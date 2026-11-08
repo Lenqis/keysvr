@@ -167,7 +167,7 @@ try {
       await page.evaluate((o) => { window.fakeSoundPlan.offset = o; }, c.sound === null ? null : c.sound - c.hand);
       await tipTo(up(k, 0.025), 0.4);
       await remote('animate_to', { device: 'hand-right', anchor: 'index-tip', position: up(k, -0.008), orientation: PRESS_POSE, duration: 0.15 });
-    } else await page.evaluate((m) => window.fakeSound(m, 1.5), c.sound);
+    } else await page.evaluate((m) => window.fakeSound(m, 5), c.sound);
     await page.waitForFunction((b) => {
       const t = window.keysvr.flow.testerMic.stats;
       return Object.keys(t).some((key) => t[key] > b[key]);
