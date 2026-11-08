@@ -21,7 +21,7 @@ export class TesterMic {
   readonly fusion = new PressFusion();
   private keys: MicKeys | null = null;
   private range: [number, number] = [36, 96];
-  /** keys with a fingertip just above them during the last second (audio-clock time) */
+  /** keys with a fingertip just above them during the last 3 s (audio-clock time) */
   private hover: { t: number; midi: number }[] = [];
   /** mic notes ignored because no finger was near that key (room noise, voices) */
   noise = 0;
@@ -65,11 +65,10 @@ export class TesterMic {
     const t = this.mic.now / this.mic.sampleRate;
     const out: Shown[] = [];
     for (const midi of new Set(hovering)) this.hover.push({ t, midi });
-    this.hover = this.hover.filter((h) => t - h.t <= 1);
+    this.hover = this.hover.filter((h) => t - h.t <= 3); // checked up to ~1 s late on slow frames
     for (const e of events) {
       if (e.type === 'down') {
         TesterMic.devPressHook?.(e.midi);
-        console.log('DBG hand', e.midi, t.toFixed(2));
         out.push(...this.fusion.handDown(e.tipId, e.midi, t));
       } else out.push(...this.fusion.handUp(e.tipId, t));
     }
@@ -77,7 +76,6 @@ export class TesterMic {
     if (this.listening && this.keys) {
       const r = this.keys.update();
       for (const o of r.onsets) {
-        console.log('DBG onset', o.midi, o.t.toFixed(2), this.nearFinger(o.midi, o.t), JSON.stringify(this.hover.slice(-3)));
         if (this.nearFinger(o.midi, o.t)) out.push(...this.fusion.micOnset(o));
         else this.noise++;
       }
