@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { OneEuroVec3 } from './oneEuro';
 
 /** Finger colors — also used later for note colors (one color per finger). */
 export const FINGER_COLORS = {
@@ -19,6 +20,9 @@ const FINGER_JOINTS: Record<Finger, string[]> = {
 };
 const FINGERS = Object.keys(FINGER_JOINTS) as Finger[];
 const ALL_JOINTS = ['wrist', ...FINGERS.flatMap((f) => FINGER_JOINTS[f])];
+const TIP_RADIUS = 0.0055;
+/** Above this wrist speed Quest tracking gets unreliable (motion blur): fade + ignore. */
+const FAST_SPEED = 1.5; // m/s
 
 /** Hand group as filled in by three.js WebXRManager (joints appear while tracked). */
 type XRHandGroup = THREE.Group & { joints?: Record<string, THREE.Group & { jointRadius?: number }> };
@@ -34,7 +38,12 @@ export class HandView {
   private readonly tmp = new THREE.Matrix4();
   private readonly pos = new THREE.Vector3();
   private readonly tips: Record<Finger, THREE.Vector3>;
+  private readonly filters = ALL_JOINTS.map(() => new OneEuroVec3());
+  private readonly world = ALL_JOINTS.map(() => new THREE.Vector3());
+  private readonly dir = new THREE.Vector3();
   visible = false;
+  /** False while the hand moves too fast to trust (presses are ignored). */
+  reliable = false;
 
   constructor(private readonly hand: XRHandGroup) {
     const mat = new THREE.MeshBasicMaterial({
@@ -69,20 +78,41 @@ export class HandView {
   /** World-space fingertip positions of this hand (valid only while visible). */
   fingertips(): Record<Finger, THREE.Vector3> { return this.tips; }
 
-  update(): void {
+  update(dt: number): void {
     const joints = this.hand.joints;
     const wrist = joints?.wrist;
+    const wasVisible = this.visible;
     this.visible = !!wrist && wrist.visible;
     this.object.visible = this.visible;
     if (!joints || !this.visible) return;
+    if (!wasVisible) this.filters.forEach((f) => f.reset());
+
+    // Smoothed world positions of all joints.
+    ALL_JOINTS.forEach((name, i) => {
+      joints[name]?.getWorldPosition(this.world[i]);
+      this.filters[i].filter(this.world[i], dt);
+    });
+    const index = (name: string) => ALL_JOINTS.indexOf(name);
+
+    this.reliable = this.filters[0].speed() < FAST_SPEED;
+    const mat = this.spheres.material as THREE.MeshBasicMaterial;
+    mat.opacity = this.reliable ? 0.75 : 0.2;
+    (this.bones.material as THREE.LineBasicMaterial).opacity = this.reliable ? 0.45 : 0.12;
 
     ALL_JOINTS.forEach((name, i) => {
-      const j = joints[name];
-      if (!j) return;
-      j.getWorldPosition(this.pos);
-      const tip = name.endsWith('tip');
-      // Metacarpals sit inside the palm: hide them; cap radius so the wrist isn't a blob.
-      const r = name.includes('metacarpal') ? 0 : tip ? 0.0075 : Math.min(j.jointRadius ?? 0.008, 0.0065);
+      const p = this.world[i];
+      let r = Math.min(joints[name]?.jointRadius ?? 0.008, 0.0065);
+      if (name.includes('metacarpal')) r = 0; // inside the palm
+      if (name.endsWith('tip')) {
+        // The tip joint is the very end of the finger: pull the dot back by its
+        // radius so its outer edge (not its center) sits at the fingertip.
+        const prev = this.world[i - 1];
+        this.dir.copy(p).sub(prev).normalize();
+        this.pos.copy(p).addScaledVector(this.dir, -TIP_RADIUS);
+        r = TIP_RADIUS;
+      } else {
+        this.pos.copy(p);
+      }
       this.tmp.makeScale(r, r, r).setPosition(this.pos);
       this.spheres.setMatrixAt(i, this.tmp);
     });
@@ -90,13 +120,13 @@ export class HandView {
 
     const attr = this.bones.geometry.getAttribute('position') as THREE.BufferAttribute;
     (this.bones.userData.pairs as string[][]).forEach(([a, b], i) => {
-      joints[a]?.getWorldPosition(this.pos);
-      attr.setXYZ(i * 2, this.pos.x, this.pos.y, this.pos.z);
-      joints[b]?.getWorldPosition(this.pos);
-      attr.setXYZ(i * 2 + 1, this.pos.x, this.pos.y, this.pos.z);
+      const pa = this.world[index(a)];
+      const pb = this.world[index(b)];
+      attr.setXYZ(i * 2, pa.x, pa.y, pa.z);
+      attr.setXYZ(i * 2 + 1, pb.x, pb.y, pb.z);
     });
     attr.needsUpdate = true;
 
-    for (const f of FINGERS) joints[FINGER_JOINTS[f].at(-1)!]?.getWorldPosition(this.tips[f]);
+    for (const f of FINGERS) this.tips[f].copy(this.world[index(FINGER_JOINTS[f].at(-1)!)]);
   }
 }
