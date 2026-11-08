@@ -20,6 +20,7 @@ export class App {
   private readonly raycaster = new THREE.Raycaster();
   private readonly cursor: THREE.Mesh;
   private needsPlacement = true;
+  private readonly clock = new THREE.Clock();
   onSessionEnd: (() => void) | null = null;
 
   constructor() {
@@ -107,11 +108,13 @@ export class App {
     }
     this.scene.updateMatrixWorld();
 
-    const tips: THREE.Vector3[] = [];
-    for (const h of this.hands) {
-      h.update();
-      if (h.visible) tips.push(...Object.values(h.fingertips()));
-    }
+    const dt = Math.min(this.clock.getDelta(), 0.1);
+    const tips = new Map<string, THREE.Vector3>();
+    this.hands.forEach((h, i) => {
+      h.update(dt);
+      if (!h.visible || !h.reliable) return;
+      for (const [finger, p] of Object.entries(h.fingertips())) tips.set(`${i}-${finger}`, p);
+    });
 
     let rayHover = false;
     this.cursor.visible = false;
