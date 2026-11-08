@@ -101,7 +101,7 @@ export class CalibrationFlow {
       case 'verify':
       case 'tester':
         if (this.step === 'verify') this.handleKeys(this.detector!.update(ctx.pressTips, ctx.dt));
-        else this.applyShown(this.testerMic.update(this.detector!.update(ctx.pressTips, ctx.dt)));
+        else this.applyShown(this.testerMic.update(this.detector!.update(ctx.pressTips, ctx.dt), this.detector!.hovering));
         // Live finger depth readout (helps tune sensitivity), 5 times a second.
         if (this.step === 'tester' && (this.readoutTimer += ctx.dt) > 0.2) {
           this.readoutTimer = 0;

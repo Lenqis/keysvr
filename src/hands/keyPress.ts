@@ -20,6 +20,8 @@ export const SENSITIVITY: Record<Sensitivity, { press: number; stroke: number; l
 const STROKE_WINDOW = 0.5;
 /** Deeper than this the tip is under/behind the keyboard, not on a key. */
 const MAX_DEPTH = 0.045;
+/** A finger this close above a key may be playing it (m). */
+const HOVER = 0.04;
 
 export interface KeyEvent {
   type: 'down' | 'up';
@@ -53,6 +55,8 @@ export class KeyPressDetector {
   stroke = STROKE;
   /** Deepest fingertip over any key in the last update (m, for the debug readout). */
   deepest: number | null = null;
+  /** Keys with a fingertip over them, at most HOVER above the key top (last update). */
+  hovering: number[] = [];
 
   setSensitivity(level: Sensitivity): void {
     this.pressDepth = SENSITIVITY[level].press;
@@ -71,6 +75,7 @@ export class KeyPressDetector {
   update(tips: Map<string, THREE.Vector3>, dt: number): KeyEvent[] {
     this.time += dt;
     this.deepest = null;
+    this.hovering = [];
     const events: KeyEvent[] = [];
     for (const [id, world] of tips) {
       let s = this.tips.get(id);
@@ -82,6 +87,7 @@ export class KeyPressDetector {
       const key = keyAt(this.cal.layout, this.local.x, this.local.z);
       const depth = key ? key.top - this.local.y : null;
       const onKey = key !== null && depth !== null && depth < MAX_DEPTH;
+      if (onKey && depth! > -HOVER) this.hovering.push(key!.midi);
 
       if (onKey) {
         s.hist.push({ t: this.time, depth: depth! });

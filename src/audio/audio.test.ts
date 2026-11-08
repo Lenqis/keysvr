@@ -108,6 +108,31 @@ describe('MicKeys (continuous note detection)', () => {
     expect(midis(listen(tail))).toEqual([60, 61]);
   });
 
+  it('ignores a voice-like gliding tone and a knock', () => {
+    const data = render(2.5, []);
+    // "voice": harmonic tone gliding 140→220 Hz over 0.4 s
+    let ph = 0;
+    for (let i = Math.round(0.5 * SR); i < Math.round(0.9 * SR); i++) {
+      const u = (i / SR - 0.5) / 0.4;
+      ph += (2 * Math.PI * (140 + 80 * u)) / SR;
+      for (let h = 1; h <= 5; h++) data[i] += (0.08 / h) * Math.sin(h * ph);
+    }
+    // "knock": 5 ms decaying noise burst
+    let seed = 3;
+    for (let i = Math.round(1.6 * SR); i < Math.round(1.62 * SR); i++) {
+      seed = (seed * 16807) % 2147483647;
+      data[i] += 0.5 * ((seed / 2147483647) * 2 - 1) * Math.exp(-(i / SR - 1.6) / 0.005);
+    }
+    expect(midis(listen(data))).toEqual([]);
+  });
+
+  it('hand-guided lookup finds a quiet note the strict detector ignores', () => {
+    const { onsets, mk } = listen(render(1.1, [{ midi: 64, on: 0.6, amp: 0.0012 }], 0.01)); // ask 0.35 s after the press, like the fusion
+    expect(onsets.map((o) => o.midi)).toEqual([]);
+    expect(mk.riseNear(63, 0.7)).toBe(64);
+    expect(mk.riseNear(70, 0.7)).toBeNull();
+  });
+
   it('readout names the loudest sounding key', () => {
     const { mk } = listen(render(1.0, [{ midi: 65, on: 0.3 }]));
     expect(mk.loudest?.midi).toBe(65);
@@ -152,6 +177,15 @@ describe('PressFusion', () => {
     f.handUp('0-index', 1.1);
     expect(f.micOnset({ midi: 50, t: 1.15, db: -30 })).toHaveLength(1);
     expect(f.update(1.5)).toMatchObject([{ type: 'up', midi: 50 }]);
+  });
+
+  it('unmatched hand press asks the guided lookup before giving up', () => {
+    const f = new PressFusion();
+    f.guide = (midi) => (midi === 60 ? 61 : null);
+    f.handDown('1-ring', 60, 1.0);
+    f.handDown('1-pinky', 70, 1.0);
+    expect(f.update(1.5)).toMatchObject([{ type: 'down', midi: 61, tipId: '1-ring' }]);
+    expect(f.stats).toMatchObject({ corrected: 1, handOnly: 1 });
   });
 
   it('mic off: hands only, immediately', () => {
