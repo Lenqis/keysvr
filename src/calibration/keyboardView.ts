@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { KeyboardCalibration } from './keyboardFrame';
 import { noteLabel } from './keyboardModel';
-import { CanvasPlane, centeredText, roundRect } from '../ui/canvasPlane';
+import { CanvasPlane, FONT, centeredText, roundRect } from '../ui/canvasPlane';
 
 const LIFT = 0.0015; // draw just above the key tops to avoid z-fighting with reality
 const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -95,7 +95,7 @@ export class KeyboardView {
    * in rows so they never overlap.
    */
   showLabels(notes: { tipId: string; midi: number; color: string }[]): void {
-    const LW = 0.095, LH = 0.04;
+    const LW = 0.12, LH = 0.04;
     const live = new Set(notes.map((n) => n.tipId));
     for (const [id, l] of this.labels) {
       if (!live.has(id)) { this.group.remove(l.mesh); this.labels.delete(id); }
@@ -125,7 +125,15 @@ export class KeyboardView {
         ctx.lineWidth = 6;
         ctx.strokeStyle = n.color;
         ctx.stroke();
-        centeredText(ctx, noteLabel(n.midi), w / 2, h / 2 + 2, h * 0.5, '#ffffff', 700);
+        // Shrink long names (e.g. "соль♯ · G#4") until they fit the box.
+        const text = noteLabel(n.midi);
+        let size = h * 0.5;
+        ctx.font = `700 ${size}px ${FONT}`;
+        while (ctx.measureText(text).width > w * 0.86 && size > h * 0.25) {
+          size *= 0.93;
+          ctx.font = `700 ${size}px ${FONT}`;
+        }
+        centeredText(ctx, text, w / 2, h / 2 + 2, size, '#ffffff', 700);
       });
     }
   }

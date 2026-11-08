@@ -89,7 +89,8 @@ export function buildLayout(range: KeyRange, span: number): KeyboardLayout {
 export function keyAt(layout: KeyboardLayout, x: number, z: number): KeyRect | null {
   let white: KeyRect | null = null;
   for (const k of layout.keys) {
-    if (z > k.zFront + FRONT_GRACE || z < k.zBack) continue;
+    // The grace in front applies to white keys only (black keys end mid-key).
+    if (z > k.zFront + (k.black ? 0 : FRONT_GRACE) || z < k.zBack) continue;
     if (Math.abs(x - k.x) > (k.black ? k.width / 2 : layout.pitch / 2)) continue;
     if (k.black) return k;
     white = k;
@@ -101,4 +102,21 @@ export function nextPreset(current: KeyRange, dir: 1 | -1): KeyRange {
   const i = KEY_PRESETS.findIndex((p) => p.keyCount === current.keyCount);
   const j = Math.min(KEY_PRESETS.length - 1, Math.max(0, (i < 0 ? 5 : i) + dir));
   return KEY_PRESETS[j];
+}
+
+/**
+ * Two keys for the verify step: the C nearest a quarter and three quarters of
+ * the range (C3 and C6 on 61 keys) — far apart, so both offset and key width
+ * can be corrected from the two presses.
+ */
+export function verifyTargets(range: KeyRange): [number, number] {
+  const lo = range.lowestMidi, hi = range.lowestMidi + range.keyCount - 1;
+  const nearestC = (m: number) => {
+    const c = Math.round(m / 12) * 12;
+    return c >= lo && c <= hi ? c : (isBlack(Math.round(m)) ? Math.round(m) + 1 : Math.round(m));
+  };
+  const a = nearestC(lo + range.keyCount * 0.25);
+  let b = nearestC(lo + range.keyCount * 0.75);
+  if (b <= a) b = Math.min(hi, a + 12);
+  return [a, b];
 }

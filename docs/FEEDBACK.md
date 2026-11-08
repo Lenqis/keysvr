@@ -14,3 +14,9 @@
 - [change] "передний край самой правой клавиши" is unclear — needs a clearer instruction/picture.
 - [bug] Tester: pressing several keys at once — note labels glitch and stick together.
 - [bug] Tester: sometimes the wrong key, sometimes no detection, sometimes detection before the finger actually pressed.
+
+## 2026-11-08 — round 2 fixes on Quest 3
+- [ok] Labels of adjacent keys no longer merge.
+- [bug] Pressing C with the index sometimes shows a neighbouring key.
+- [bug] Fingertip dots sit deeper than the real fingertips when bending; must press "with almost the whole finger" for a key to register.
+- [bug] Long note names (соль♯ · G#4) overflow the label box.

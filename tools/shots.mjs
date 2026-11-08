@@ -39,7 +39,7 @@ async function tipTo(p, seconds = 0.4, orientation = PRESS_POSE) {
   });
   await wait(seconds * 1000 + 100);
 }
-const synth = (expr) => page.evaluate(expr);
+const synth = (expr, arg) => page.evaluate(expr, arg);
 const up = (p, dy) => ({ x: p.x, y: p.y + dy, z: p.z });
 
 /** Pokes a panel button by label with the right index finger. */
@@ -83,8 +83,10 @@ try {
   await expectStep('touchLeft');
   await shot('02-touch-left');
 
-  const left = await synth(() => window.fakeSynth.left);
-  const right = await synth(() => window.fakeSynth.right);
+  // Touch the end keys a bit off-centre (as real people do): the two-key verify
+  // step must correct the resulting offset and width error.
+  const left = await synth(() => window.fakeSynth.keyPoint(36, 0.004, 0, 0.008));
+  const right = await synth(() => window.fakeSynth.keyPoint(96, 0.004, 0, -0.006));
   // Repro of a reported bug: the other hand comes down and rests still below the
   // keys (on the lap) — it must NOT be captured as the calibration point.
   await remote('animate_to', { device: 'hand-left', anchor: 'index-tip', position: { x: -0.15, y: 0.62, z: 0.05 }, orientation: PRESS_POSE, duration: 0.8 });
@@ -112,17 +114,37 @@ try {
   await tipTo(up(right, 0.06), 0.3);
   await shot('05-verify');
 
-  // Press middle C on the fake synth (should match the grid).
-  const c4 = await synth(() => window.fakeSynth.keyPoint(60, 0.04));
-  await tipTo(up(c4, 0.03), 0.5);
-  await tipTo(up(c4, -0.009), 0.2);
-  await wait(200);
-  await shot('06-verify-pressed');
-  await tipTo(up(c4, 0.04), 0.2);
+  // Press the two yellow keys (C3, C6) at their real centres.
+  for (const [i, midi] of [[0, 48], [1, 84]]) {
+    const k = await synth((m) => window.fakeSynth.keyPoint(m, 0.04), midi);
+    await tipTo(up(k, 0.03), 0.6);
+    await tipTo(up(k, -0.009), 0.2);
+    await wait(300);
+    if (i === 1) await shot('06-verify-pressed');
+    await tipTo(up(k, 0.04), 0.2);
+    await wait(300);
+  }
+  const vi = await page.evaluate(() => window.keysvr.flow.verify.idx);
+  if (vi !== 2) errors.push('verify step did not register both yellow keys, idx=' + vi);
 
   await pokeButton('Готово ✓');
   await wait(400);
   await expectStep('tester');
+
+  // Accuracy sweep: white and black keys across the range must be detected exactly.
+  const wrong = [];
+  for (const midi of [40, 47, 52, 59, 61, 66, 70, 76, 82, 89]) {
+    const k = await synth((m) => window.fakeSynth.keyPoint(m, window.fakeSynth.isBlack(m) ? 0.03 : 0.05), midi);
+    await tipTo(up(k, 0.025), 0.4);
+    await tipTo(up(k, -0.008), 0.15);
+    await wait(250);
+    const held = await page.evaluate(() => window.keysvr.flow.heldNotes());
+    if (held.length !== 1 || held[0] !== midi) wrong.push(`${midi}→${JSON.stringify(held)}`);
+    await tipTo(up(k, 0.025), 0.15);
+    await wait(150);
+  }
+  console.log('accuracy sweep:', wrong.length ? 'WRONG ' + wrong.join(', ') : 'all 10 keys exact');
+  if (wrong.length) errors.push('accuracy sweep: ' + wrong.join(', '));
 
   const e4 = await synth(() => window.fakeSynth.keyPoint(64, 0.05));
   await tipTo(up(e4, 0.03), 0.4);

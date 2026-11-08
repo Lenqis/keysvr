@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { DEFAULT_PRESET, buildLayout, keyAt, noteLabel, whiteCount, MIDDLE_C, KEY_PRESETS, isBlack } from './keyboardModel';
-import { KeyboardCalibration, TIP_ABOVE_SURFACE, frameFromPoints } from './keyboardFrame';
+import { verifyTargets, DEFAULT_PRESET, buildLayout, keyAt, noteLabel, whiteCount, MIDDLE_C, KEY_PRESETS, isBlack } from './keyboardModel';
+import { KeyboardCalibration, TIP_ABOVE_SURFACE, frameFromPoints, refineFromPresses } from './keyboardFrame';
 import { KeyPressDetector } from '../hands/keyPress';
 
 const PITCH = 0.0235;
@@ -31,6 +31,10 @@ describe('keyboardModel', () => {
     expect(keyAt(l, 14.4 * PITCH, -0.12)?.midi).toBe(61);
     // same x but at the front (black keys don't reach) → C4 or D4 white
     expect([60, 62]).toContain(keyAt(l, 14.4 * PITCH, -0.02)?.midi);
+    // white key just in front of a black key's front end stays white (C6 vs C#6)
+    const c6 = l.keys.find((k) => k.midi === 84)!;
+    const cs6 = l.keys.find((k) => k.midi === 85)!;
+    expect(keyAt(l, (c6.x + cs6.x) / 2, cs6.zFront + 0.015)?.midi).toBe(84);
     // far in front of the keyboard → nothing
     expect(keyAt(l, 14 * PITCH, 0.05)).toBeNull();
   });
@@ -80,10 +84,24 @@ describe('KeyPressDetector', () => {
     expect(ev[1].maxDepth).toBeCloseTo(0.009, 6);
   });
 
-  it('ignores a fingertip resting on the key surface (tracking noise)', () => {
+  it('ignores a fingertip resting on the key surface (±2 mm tracking noise)', () => {
     const { run } = setup();
+    const depths = Array.from({ length: 60 }, (_, i) => 0.002 + (i % 2 ? 0.002 : -0.002));
+    expect(run(depths)).toEqual([]);
+  });
+
+  it('low sensitivity also ignores heavy noise (7 mm peak-to-peak)', () => {
+    const { det, run } = setup();
+    det.setSensitivity('low');
     const depths = Array.from({ length: 60 }, (_, i) => 0.003 + (i % 2 ? 0.004 : -0.003));
     expect(run(depths)).toEqual([]);
+  });
+
+  it('mid sensitivity catches a gentle press from resting on the key', () => {
+    const { run } = setup();
+    const ev = run([0.0, 0.0, 0.002, 0.004, 0.006, 0.007, 0.007, 0.003, -0.002]);
+    expect(ev.map((e) => e.type)).toEqual(['down', 'up']);
+    expect(ev[0].x).toBeCloseTo(14 * PITCH, 4);
   });
 
   it('ignores a tip that appears already deep (hand under the keyboard)', () => {
@@ -95,5 +113,36 @@ describe('KeyPressDetector', () => {
     const { det, run } = setup();
     det.pressDepth = 0;
     expect(run([-0.012, -0.006, 0.001]).map((e) => e.type)).toEqual(['down']);
+  });
+});
+
+describe('two-point refinement', () => {
+  it('picks C3 and C6 on 61 keys, valid keys on every preset', () => {
+    expect(verifyTargets(DEFAULT_PRESET)).toEqual([48, 84]);
+    for (const p of KEY_PRESETS) {
+      const [a, b] = verifyTargets(p);
+      expect(a).toBeGreaterThanOrEqual(p.lowestMidi);
+      expect(b).toBeLessThan(p.lowestMidi + p.keyCount);
+      expect(b).toBeGreaterThan(a);
+    }
+  });
+
+  it('fixes a 2 % width error and a 7 mm shift from two presses', () => {
+    const { base, span } = frameFromPoints(new THREE.Vector3(0, 0.8, -0.4), new THREE.Vector3(35 * PITCH, 0.8, -0.4));
+    const cal = new KeyboardCalibration(base, span, DEFAULT_PRESET);
+    const realX = (midi: number) => cal.layout.keys.find((k) => k.midi === midi)!.x * 1.02 + 0.007;
+    // world positions of the real C4 and G5 key centres (taken before refining)
+    const world = [60, 79].map((m) => new THREE.Vector3(realX(m), 0, -0.05).applyMatrix4(cal.matrix));
+    expect(refineFromPresses(cal, 48, realX(48), 84, realX(84))).toBe(true);
+    [60, 79].forEach((m, i) => {
+      const k = cal.layout.keys.find((kk) => kk.midi === m)!;
+      expect(cal.toLocal(world[i]).x).toBeCloseTo(k.x, 4);
+    });
+  });
+
+  it('rejects an implausible correction', () => {
+    const { base, span } = frameFromPoints(new THREE.Vector3(0, 0.8, -0.4), new THREE.Vector3(35 * PITCH, 0.8, -0.4));
+    const cal = new KeyboardCalibration(base, span, DEFAULT_PRESET);
+    expect(refineFromPresses(cal, 48, 0.1, 84, 0.2)).toBe(false);
   });
 });

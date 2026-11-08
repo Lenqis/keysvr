@@ -45,6 +45,27 @@ export class KeyboardCalibration {
 }
 
 /**
+ * Two-point refinement from real presses: the player pressed key A at local x
+ * `xa` and key B at `xb` (keyboard-local, current grid). Rescales the span and
+ * shifts the grid so both keys sit exactly under the fingers. Returns false
+ * (and changes nothing) if the needed scale is implausible (>10 %).
+ */
+export function refineFromPresses(
+  cal: KeyboardCalibration, midiA: number, xa: number, midiB: number, xb: number,
+): boolean {
+  const A = cal.layout.keys.find((k) => k.midi === midiA);
+  const B = cal.layout.keys.find((k) => k.midi === midiB);
+  if (!A || !B || A.x === B.x) return false;
+  const scale = (xb - xa) / (B.x - A.x);
+  if (!(scale > 0.9 && scale < 1.1)) return false;
+  cal.nudge.x += xa - A.x * scale;
+  cal.span *= scale;
+  cal.setRange(cal.range); // rebuilds the layout with the new span
+  cal.update();
+  return true;
+}
+
+/**
  * Keyboard frame from two touched points: fingertip on the front edge of the
  * lowest key (left) and of the highest key (right). +x runs left→right, +y is
  * world-up made perpendicular to x, so +z (= x × y) faces the player.

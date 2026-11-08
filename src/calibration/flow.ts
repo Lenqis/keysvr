@@ -1,14 +1,18 @@
 import * as THREE from 'three';
 import { FINGER_COLORS, type Finger } from '../hands/handView';
-import { KeyPressDetector, PRESS_DEPTH, type KeyEvent } from '../hands/keyPress';
+import { KeyPressDetector, SENSITIVITY, type KeyEvent, type Sensitivity } from '../hands/keyPress';
 import type { Panel } from '../ui/panel';
-import { HoldCapture } from './holdCapture';
+import { panelFor } from './flowPanels';
+import { HoldCapture, inGaze } from './holdCapture';
 import { KeyboardCalibration, frameFromPoints, plausiblePitch } from './keyboardFrame';
-import { DEFAULT_PRESET, MIDDLE_C, nextPreset, noteLabel, type KeyRange } from './keyboardModel';
+import { DEFAULT_PRESET, nextPreset, noteLabel, type KeyRange } from './keyboardModel';
+import { PanelPlacement } from './panelPlacement';
+import { VerifyStep } from './verifyStep';
 import { KeyboardView } from './keyboardView';
 import { anchorMatrix, loadSaved, restoreAnchor, saveCalibration, savedMatrix } from './storage';
 
-export type Step = 'start' | 'restoring' | 'confirmSaved' | 'touchLeft' | 'touchRight' | 'verify' | 'tester';
+export type { Step } from './flowPanels';
+import type { Step } from './flowPanels';
 
 export interface FrameCtx {
   dt: number;
@@ -22,14 +26,9 @@ export interface FrameCtx {
 }
 
 const NUDGE = 0.003;
-/** Key travel of a typical synth key (m). */
-const KEY_TRAVEL = 0.009;
+const SENS_KEY = 'keysvr.sensitivity';
+const SENS_ORDER: Sensitivity[] = ['low', 'mid', 'high'];
 
-/** Is `pt` within `deg` degrees of where the player looks? */
-function inGaze(ctx: FrameCtx, pt: THREE.Vector3, deg: number): boolean {
-  const dir = pt.clone().sub(ctx.head).normalize();
-  return dir.dot(ctx.forward) > Math.cos(THREE.MathUtils.degToRad(deg));
-}
 const YELLOW = '#ffd93d';
 const fingerOf = (tipId: string) => tipId.split('-')[1] as Finger;
 const fingerHex = (tipId: string) => `#${FINGER_COLORS[fingerOf(tipId)].toString(16).padStart(6, '0')}`;
@@ -39,22 +38,25 @@ export class CalibrationFlow {
   step: Step = 'start';
   cal: KeyboardCalibration | null = null;
   private view: KeyboardView | null = null;
-  private detector: KeyPressDetector | null = null;
+  detector: KeyPressDetector | null = null;
   readonly capture = new HoldCapture();
   private readonly ring: THREE.Mesh;
   private readonly marker: THREE.Mesh;
   left: THREE.Vector3 | null = null;
   private range: KeyRange = DEFAULT_PRESET;
   private anchor: XRAnchor | null = null;
-  private status = '';
+  status = '';
   private statusColor = '#d5d9f0';
   private lastNote: { midi: number; color: string } | null = null;
   private placed = false;
-  private following = false;
   private restoreTimer = 0;
-  private heightTuned = false;
+  readonly verify = new VerifyStep();
+  private readonly placement: PanelPlacement;
+  private sensitivity: Sensitivity = (localStorage.getItem(SENS_KEY) as Sensitivity | null) ?? 'mid';
+  private readoutTimer = 0;
 
   constructor(private readonly scene: THREE.Scene, private readonly panel: Panel) {
+    this.placement = new PanelPlacement(panel);
     this.ring = new THREE.Mesh(
       new THREE.RingGeometry(0.014, 0.019, 40),
       new THREE.MeshBasicMaterial({ color: YELLOW, transparent: true, depthTest: false, side: THREE.DoubleSide }),
@@ -104,11 +106,18 @@ export class CalibrationFlow {
       case 'verify':
       case 'tester':
         this.handleKeys(this.detector!.update(ctx.pressTips, ctx.dt));
+        // Live finger depth readout (helps tune sensitivity), 5 times a second.
+        if (this.step === 'tester' && (this.readoutTimer += ctx.dt) > 0.2) {
+          this.readoutTimer = 0;
+          this.render();
+        }
         break;
     }
     if (ctx.head.y > 0.3) {
-      if (!this.placed) this.placePanel(ctx);
-      else if (!this.cal) this.followGaze(ctx);
+      if (!this.placed) {
+        this.placed = true;
+        this.placement.place(ctx, this.cal);
+      } else if (!this.cal) this.placement.follow(ctx);
     }
   }
 
@@ -119,7 +128,7 @@ export class CalibrationFlow {
     const p = this.capture.update(index, ctx.dt, (pt) =>
       pt.y < ctx.head.y - 0.15 && pt.y > ctx.head.y - 1.3 &&
       // Only the finger the player is looking at (not a hand resting elsewhere).
-      inGaze(ctx, pt, 22) &&
+      inGaze(ctx.head, ctx.forward, pt, 22) &&
       // The right end must be level with the left one and a keyboard-width away.
       (!left || (Math.abs(pt.y - left.y) < 0.06 && pt.distanceTo(left) > 0.3 && pt.distanceTo(left) < 1.7)));
     if (this.capture.progress > 0.05) {
@@ -148,8 +157,9 @@ export class CalibrationFlow {
     const view = this.view!;
     for (const e of events) {
       if (e.type === 'up') {
-        view.setKeyColor(e.midi, this.step === 'verify' && e.midi === this.target() ? YELLOW : null);
-        if (this.step === 'verify' && e.maxDepth !== undefined) this.adaptHeight(e.maxDepth);
+        const stillTarget = this.step === 'verify' && !this.verify.done && e.midi === this.verify.target(this.cal!);
+        view.setKeyColor(e.midi, stillTarget ? YELLOW : null);
+        if (this.step === 'verify' && this.verify.onRelease(this.cal!, e)) this.render();
         continue;
       }
       const color = fingerHex(e.tipId);
@@ -167,43 +177,14 @@ export class CalibrationFlow {
     return [...(this.detector?.held().values() ?? [])];
   }
 
-  /** The key to press in the verify step: middle C, or the middle key if out of range. */
-  private target(): number {
-    const r = this.cal!.range;
-    const inRange = MIDDLE_C >= r.lowestMidi && MIDDLE_C < r.lowestMidi + r.keyCount;
-    return inRange ? MIDDLE_C : r.lowestMidi + Math.floor(r.keyCount / 2);
-  }
-
-  /**
-   * The finger stops at the bottom of the key travel: put the key tops one
-   * travel above that, so later presses trigger mid-travel for this player.
-   */
-  private adaptHeight(maxDepth: number): void {
-    const cal = this.cal!;
-    cal.nudge.y = THREE.MathUtils.clamp(cal.nudge.y + (KEY_TRAVEL - maxDepth), -0.02, 0.02);
-    cal.update();
-    this.heightTuned = true;
-    this.render();
-  }
-
-  /** Auto-centres the grid on where the target key was actually pressed. */
   private onVerifyPress(e: KeyEvent): void {
-    const cal = this.cal!;
-    const target = cal.layout.keys.find((k) => k.midi === this.target())!;
-    const pressed = cal.layout.keys.find((k) => k.midi === e.midi)!;
-    const offKeys = Math.round((pressed.x - target.x) / cal.layout.pitch);
-    if (Math.abs(offKeys) > 2) {
-      this.status = `Нажато: ${noteLabel(e.midi)} — далеко. Проверь число клавиш`;
-      this.statusColor = '#ff9b6b';
-      return;
-    }
-    // Shift the grid so the target key sits where the finger pressed.
-    cal.nudge.x += pressed.x - target.x;
-    cal.update();
+    const r = this.verify.onPress(this.cal!, e);
+    if (!r) return;
+    this.status = r.status.text;
+    this.statusColor = r.status.color;
+    if (r.rebuilt) this.view!.rebuild();
     this.view!.clearColors();
-    this.view!.setKeyColor(target.midi, YELLOW);
-    this.status = offKeys === 0 ? 'Совпало ✓ Жми «Готово»' : `Сетка сдвинута на ${Math.abs(offKeys)} клав. Нажми жёлтую ещё раз`;
-    this.statusColor = offKeys === 0 ? '#8af59a' : '#ffd93d';
+    if (!this.verify.done) this.view!.setKeyColor(this.verify.target(this.cal!), YELLOW);
   }
 
   private setCalibration(cal: KeyboardCalibration): void {
@@ -225,16 +206,20 @@ export class CalibrationFlow {
       this.view = null;
       this.cal = null;
       this.placed = false;
-      this.heightTuned = false;
+      this.verify.reset();
     }
-    // Verify: catch even shallow presses (height not tuned yet); later: normal threshold.
-    if (this.detector) this.detector.pressDepth = step === 'verify' ? 0 : PRESS_DEPTH;
+    // Verify: catch even shallow presses (height not tuned yet); later: chosen sensitivity.
+    if (this.detector) {
+      this.detector.setSensitivity(this.sensitivity);
+      if (step === 'verify') this.detector.pressDepth = 0;
+    }
+    if (step === 'verify') this.verify.reset(true);
     if (this.view) {
       this.view.group.visible = step !== 'restoring';
       this.view.clearColors();
       this.view.setOutlineOpacity(step === 'tester' ? 0.3 : 0.6);
       if (step === 'verify') {
-        this.view.setKeyColor(this.target(), YELLOW);
+        this.view.setKeyColor(this.verify.target(this.cal!), YELLOW);
         if (!plausiblePitch(this.cal!.layout)) {
           this.status = `Клавиши ${(this.cal!.layout.pitch * 1000).toFixed(0)} мм — проверь число клавиш`;
           this.statusColor = '#ff9b6b';
@@ -244,116 +229,43 @@ export class CalibrationFlow {
     this.render();
   }
 
-  private placePanel(ctx: FrameCtx): void {
-    this.placed = true;
-    if (this.cal && this.view) {
-      const L = this.cal.layout;
-      const pos = this.view.localToWorld(this.cal.span / 2, 0.27, -L.whiteLength - 0.02);
-      this.panel.group.position.copy(pos);
-      this.panel.group.lookAt(ctx.head);
-    } else {
-      this.panel.placeInFrontOf(ctx.head, ctx.forward, 0.7, 0.12);
-    }
-  }
-
-  /**
-   * No keyboard yet: keep the hint panel in view when the player turns, at eye
-   * level (so looking down at the keys never puts it on top of them).
-   */
-  private followGaze(ctx: FrameCtx): void {
-    const g = this.panel.group;
-    const toPanel = new THREE.Vector3(g.position.x - ctx.head.x, 0, g.position.z - ctx.head.z).normalize();
-    const fwd = new THREE.Vector3(ctx.forward.x, 0, ctx.forward.z);
-    if (fwd.lengthSq() < 1e-4) return;
-    fwd.normalize();
-    if (toPanel.dot(fwd) < Math.cos(THREE.MathUtils.degToRad(25))) this.following = true;
-    if (!this.following) return;
-    // Ease toward the spot straight ahead rather than jumping; stop once there.
-    const target = ctx.head.clone().addScaledVector(fwd, 0.7);
-    target.y = ctx.head.y - 0.12;
-    g.position.lerp(target, Math.min(1, ctx.dt * 4));
-    g.lookAt(ctx.head);
-    if (g.position.distanceTo(target) < 0.02) this.following = false;
-  }
-
   /** Redraws the panel for the current step. */
   render(): void {
-    const p = this.panel;
-    const status = { text: this.status || ' ', color: this.statusColor, weight: 700 };
-    switch (this.step) {
-      case 'start':
-      case 'restoring':
-        p.set({ title: 'Загрузка калибровки…', lines: [] });
-        break;
-      case 'confirmSaved':
-        p.set({
-          title: 'Синтезатор на месте?',
-          lines: ['Голубая сетка должна лежать точно на клавишах', 'Если съехала — откалибруй заново'],
-          buttons: [[
-            { label: 'Заново', variant: 'secondary', onPress: () => this.go('touchLeft') },
-            { label: 'Всё верно', onPress: () => this.go('tester') },
-          ]],
-        });
-        break;
-      case 'touchLeft':
-        p.set({
-          title: 'Шаг 1 из 3',
-          lines: [
-            'Поставь указательный палец',
-            { text: 'на самую ЛЕВУЮ клавишу', weight: 700, color: '#ffffff' },
-            'у ближнего к тебе края. Держи 1 сек.',
-          ],
-          picture: 'left',
-        });
-        break;
-      case 'touchRight':
-        p.set({
-          title: 'Шаг 2 из 3',
-          lines: [
-            'Теперь поставь палец',
-            { text: 'на самую ПРАВУЮ клавишу', weight: 700, color: '#ffffff' },
-            'у ближнего к тебе края. Держи 1 сек.',
-          ],
-          picture: 'right',
-          buttons: [[{ label: 'Назад', variant: 'secondary', onPress: () => this.go('touchLeft') }]],
-        });
-        break;
-      case 'verify': {
-        const n = this.cal!.range.keyCount;
-        p.set({
-          title: 'Шаг 3 из 3 · проверка',
-          lines: [
-            `Нажми жёлтую клавишу — ${noteLabel(this.target())}`,
-            status,
-            this.heightTuned ? { text: 'Высота клавиш подстроена под нажатие ✓', color: '#8af59a' } : ' ',
-          ],
-          buttons: [
-            [
-              { label: '◀', variant: 'secondary', onPress: () => this.nudge(-NUDGE) },
-              { label: '▶', variant: 'secondary', onPress: () => this.nudge(NUDGE) },
-              { label: `Клавиш: ${n}`, variant: 'secondary', grow: 2, onPress: () => this.cycleKeys() },
-            ],
-            [
-              { label: 'Заново', variant: 'secondary', onPress: () => this.go('touchLeft') },
-              { label: 'Готово ✓', onPress: () => void this.finish() },
-            ],
-          ],
-        });
-        break;
-      }
-      case 'tester': {
-        const note = this.lastNote;
-        p.set({
-          title: 'Тестер клавиш',
-          lines: [
-            note ? { text: noteLabel(note.midi), color: note.color, size: 0.03, weight: 800 } : 'Нажимай любые клавиши',
-            note ? { text: 'Руки ✓   Микрофон — на следующем этапе', color: '#8af59a' } : ' ',
-          ],
-          buttons: [[{ label: 'Калибровка', variant: 'secondary', onPress: () => this.go('touchLeft') }]],
-        });
-        break;
-      }
-    }
+    this.panel.set(panelFor({
+      step: this.step,
+      status: this.status,
+      statusColor: this.statusColor,
+      keyCount: this.cal?.range.keyCount ?? 0,
+      verifyIdx: this.verify.idx,
+      target: this.cal ? noteLabel(this.verify.target(this.cal)) : '',
+      heightTuned: this.verify.heightTuned,
+      lastNote: this.lastNote,
+      depthText: this.depthReadout(),
+      sensLabel: SENSITIVITY[this.sensitivity].label,
+    }, {
+      recalibrate: () => this.go('touchLeft'),
+      confirm: () => this.go('tester'),
+      nudge: (dx) => this.nudge(dx * NUDGE),
+      cycleKeys: () => this.cycleKeys(),
+      finish: () => void this.finish(),
+      cycleSensitivity: () => this.cycleSensitivity(),
+    }));
+  }
+
+  /** "Палец ниже верха клавиши: 3 мм · порог 4 мм" — for tuning and bug reports. */
+  private depthReadout(): string {
+    const d = this.detector?.deepest ?? null;
+    const thr = Math.round(SENSITIVITY[this.sensitivity].press * 1000);
+    if (d === null) return `Порог нажатия: ${thr} мм`;
+    const mm = Math.round(d * 1000);
+    return `Палец ${mm >= 0 ? 'ниже' : 'выше'} верха клавиши: ${Math.abs(mm)} мм · порог ${thr} мм`;
+  }
+
+  private cycleSensitivity(): void {
+    this.sensitivity = SENS_ORDER[(SENS_ORDER.indexOf(this.sensitivity) + 1) % SENS_ORDER.length];
+    localStorage.setItem(SENS_KEY, this.sensitivity);
+    this.detector?.setSensitivity(this.sensitivity);
+    this.render();
   }
 
   private nudge(dx: number): void {

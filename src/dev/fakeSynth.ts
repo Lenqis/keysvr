@@ -44,9 +44,10 @@ export function addFakeSynth(scene: THREE.Scene) {
     left: world(layout.keys[0].x, 0, -0.004),
     right: world(layout.keys.at(-1)!.x, 0, -0.004),
     /** point on a key's top surface, `back` metres from its front edge */
-    keyPoint(midi: number, back = 0.03, above = 0) {
+    isBlack: (midi: number) => layout.keys.find((k) => k.midi === midi)!.black,
+    keyPoint(midi: number, back = 0.03, above = 0, dx = 0) {
       const k = layout.keys.find((kk) => kk.midi === midi)!;
-      return world(k.x, k.top + above, k.zFront - back);
+      return world(k.x + dx, k.top + above, k.zFront - back);
     },
   };
   (window as unknown as { fakeSynth: typeof api }).fakeSynth = api;
