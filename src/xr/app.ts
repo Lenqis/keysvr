@@ -1,26 +1,29 @@
 import * as THREE from 'three';
+import { CalibrationFlow } from '../calibration/flow';
 import { HandView } from '../hands/handView';
-import { WelcomePanel } from '../ui/welcomePanel';
-import { PokeTarget, rayHits } from '../ui/pointer';
+import { Panel } from '../ui/panel';
+import { rayHits } from '../ui/pointer';
 
 const SESSION_INIT: XRSessionInit = {
   requiredFeatures: ['local-floor'],
-  optionalFeatures: ['hand-tracking'],
+  optionalFeatures: ['hand-tracking', 'anchors'],
 };
 
-/** Owns the renderer, scene and the XR session for the stage-0 welcome scene. */
+/** Owns the renderer, scene, input and XR session; the flow drives the screens. */
 export class App {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(70, 1, 0.01, 50);
-  readonly panel = new WelcomePanel();
+  readonly panel = new Panel();
+  readonly flow: CalibrationFlow;
   private readonly hands: HandView[] = [];
-  private readonly rays: { ctrl: THREE.Group; line: THREE.Line }[] = [];
-  private readonly poke: PokeTarget;
+  private readonly rays: THREE.Group[] = [];
   private readonly raycaster = new THREE.Raycaster();
   private readonly cursor: THREE.Mesh;
-  private needsPlacement = true;
   private readonly clock = new THREE.Clock();
+  private readonly head = new THREE.Vector3();
+  private readonly forward = new THREE.Vector3();
+  private session: XRSession | null = null;
   onSessionEnd: (() => void) | null = null;
 
   constructor() {
@@ -33,7 +36,11 @@ export class App {
     document.body.appendChild(this.renderer.domElement);
 
     this.scene.add(this.panel.group);
-    this.poke = new PokeTarget(this.panel.button);
+    this.flow = new CalibrationFlow(this.scene, this.panel);
+    this.flow.frameSource = () => ({
+      frame: this.renderer.xr.getFrame() ?? null,
+      refSpace: this.renderer.xr.getReferenceSpace(),
+    });
 
     this.cursor = new THREE.Mesh(
       new THREE.RingGeometry(0.004, 0.007, 24),
@@ -70,11 +77,9 @@ export class App {
     line.scale.z = 2;
     line.visible = false;
     ctrl.add(line);
-    this.rays.push({ ctrl, line });
-    // Trigger (controller) or pinch (hand) while aiming at the button → press.
-    ctrl.addEventListener('select', () => {
-      if (rayHits(this.raycaster, ctrl, this.panel.button.group)) this.panel.button.press();
-    });
+    this.rays.push(ctrl);
+    // Trigger (controller) or pinch (hand) while aiming at a button → press.
+    ctrl.addEventListener('select', () => this.panel.select(ctrl, this.raycaster));
     ctrl.addEventListener('connected', (e) => {
       // Hands get no visible ray: poking with a finger is the main hand interaction.
       line.visible = !(e as unknown as { data: XRInputSource }).data.hand;
@@ -88,27 +93,27 @@ export class App {
 
   async start(): Promise<void> {
     const session = await navigator.xr!.requestSession('immersive-ar', SESSION_INIT);
-    session.addEventListener('end', () => this.onSessionEnd?.());
-    this.needsPlacement = true;
-    this.panel.setMode('welcome');
+    session.addEventListener('end', () => {
+      this.session = null;
+      this.onSessionEnd?.();
+    });
     await this.renderer.xr.setSession(session);
+    this.session = session;
+    this.flow.begin(session);
   }
 
   private frame(): void {
     const xr = this.renderer.xr;
-    if (xr.isPresenting && this.needsPlacement) {
-      const cam = xr.getCamera();
-      const head = new THREE.Vector3().setFromMatrixPosition(cam.matrixWorld);
-      // Wait for a real head pose (y > 0.3 m above the floor).
-      if (head.y > 0.3) {
-        const fwd = new THREE.Vector3(0, 0, -1).transformDirection(cam.matrixWorld);
-        this.panel.placeInFrontOf(head, fwd);
-        this.needsPlacement = false;
-      }
+    const dt = Math.min(this.clock.getDelta(), 0.1);
+    if (!xr.isPresenting || !this.session) {
+      this.renderer.render(this.scene, this.camera);
+      return;
     }
+    const cam = xr.getCamera();
+    this.head.setFromMatrixPosition(cam.matrixWorld);
+    this.forward.set(0, 0, -1).transformDirection(cam.matrixWorld);
     this.scene.updateMatrixWorld();
 
-    const dt = Math.min(this.clock.getDelta(), 0.1);
     const tips = new Map<string, THREE.Vector3>();
     this.hands.forEach((h, i) => {
       h.update(dt);
@@ -116,18 +121,22 @@ export class App {
       for (const [finger, p] of Object.entries(h.fingertips())) tips.set(`${i}-${finger}`, p);
     });
 
-    let rayHover = false;
+    this.flow.update({
+      dt, tips, head: this.head, forward: this.forward,
+      frame: xr.getFrame() ?? null, refSpace: xr.getReferenceSpace(),
+    });
+    this.panel.group.updateMatrixWorld(true);
+
+    const activeRays = this.rays.filter((r) => r.visible);
     this.cursor.visible = false;
-    for (const { ctrl } of this.rays) {
-      if (!ctrl.visible) continue;
-      const hit = rayHits(this.raycaster, ctrl, this.panel.group);
+    for (const ray of activeRays) {
+      const hit = rayHits(this.raycaster, ray, this.panel.group);
       if (!hit) continue;
       this.cursor.position.copy(hit.point);
       this.cursor.quaternion.copy(this.panel.group.quaternion);
       this.cursor.visible = true;
-      if (rayHits(this.raycaster, ctrl, this.panel.button.group)) rayHover = true;
     }
-    this.poke.update(tips, rayHover);
+    this.panel.update(tips, activeRays, this.raycaster);
     this.renderer.render(this.scene, this.camera);
   }
 }

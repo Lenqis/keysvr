@@ -5,3 +5,6 @@
 - [bug] Ring finger press works every other time when the pinky is next to it.
 - [bug] Virtual hand drifts off the real hand when shaking hands fast, then returns.
 - [bug] Colored fingertip dot is not exactly at the end of the finger (all fingers).
+
+## 2026-11-08 — round 1 fixes re-tested on Quest 3
+- [ok] Ring finger presses reliably with the pinky nearby; hand smoothing/fade and fingertip dots accepted.
