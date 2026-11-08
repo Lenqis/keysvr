@@ -97,6 +97,7 @@ export class App {
 
   async start(): Promise<void> {
     const session = await navigator.xr!.requestSession('immersive-ar', SESSION_INIT);
+    void this.mic.ctx?.resume();
     session.addEventListener('end', () => {
       this.session = null;
       this.onSessionEnd?.();

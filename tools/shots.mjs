@@ -151,32 +151,41 @@ try {
 
   // Mic: hand presses `hand`, the synth actually sounds `sound` (null = silence).
   const micCases = [
-    { hand: 60, sound: 60, want: 'match' },
-    { hand: 60, sound: 61, want: 'corrected', shot: '08b-tester-mic-fixed' },
-    { hand: 72, sound: 70, want: 'corrected' },
-    { hand: 48, sound: 49, want: 'corrected' },
-    { hand: 62, sound: null, want: 'silent' },
+    { hand: 60, sound: 60, want: 'match', lit: 60 },
+    { hand: 60, sound: 61, want: 'corrected', lit: 61, shot: '08b-tester-mic-fixed' },
+    { hand: 72, sound: 70, want: 'corrected', lit: 70 },
+    { hand: 48, sound: 49, want: 'corrected', lit: 49 },
+    { hand: 62, sound: null, want: 'handOnly', lit: null }, // hovering finger, no sound → not lit
+    { hand: null, sound: 65, want: 'micOnly', lit: 65, shot: '08c-tester-mic-only' }, // hands missed it
   ];
+  const stats = () => page.evaluate(() => ({ ...window.keysvr.flow.testerMic.stats }));
   for (const c of micCases) {
-    const before = await page.evaluate(() => ({ ...window.keysvr.flow.testerMic.stats }));
-    const k = await synth((m) => window.fakeSynth.keyPoint(m, 0.05), c.hand);
-    // The fake synth sounds at the moment of the press (as a real key bottoming out).
-    await page.evaluate((o) => { window.fakeSoundPlan.offset = o; }, c.sound === null ? null : c.sound - c.hand);
-    await tipTo(up(k, 0.025), 0.4);
-    await remote('animate_to', { device: 'hand-right', anchor: 'index-tip', position: up(k, -0.008), orientation: PRESS_POSE, duration: 0.15 });
-    const sum = (o) => o.match + o.corrected + o.silent;
-    await page.waitForFunction((n) => { const t = window.keysvr.flow.testerMic.stats; return t.match + t.corrected + t.silent > n; }, sum(before), { timeout: 4000 }).catch(() => {});
-    await wait(150);
-    const after = await page.evaluate(() => ({ ...window.keysvr.flow.testerMic.stats }));
-    const got = Object.keys(after).find((key) => after[key] > before[key]) ?? 'none';
-    const held = await page.evaluate(() => window.keysvr.flow.heldNotes());
-    console.log(`mic: hand ${c.hand}, sound ${c.sound} → ${got}`);
-    if (got !== c.want) errors.push(`mic case ${JSON.stringify(c)} → ${got}, held ${JSON.stringify(held)}`);
+    const before = await stats();
+    const k = c.hand === null ? null : await synth((m) => window.fakeSynth.keyPoint(m, 0.05), c.hand);
+    if (k) {
+      // The fake synth sounds at the moment of the press (as a real key bottoming out).
+      await page.evaluate((o) => { window.fakeSoundPlan.offset = o; }, c.sound === null ? null : c.sound - c.hand);
+      await tipTo(up(k, 0.025), 0.4);
+      await remote('animate_to', { device: 'hand-right', anchor: 'index-tip', position: up(k, -0.008), orientation: PRESS_POSE, duration: 0.15 });
+    } else await page.evaluate((m) => window.fakeSound(m, 5), c.sound);
+    await page.waitForFunction((b) => {
+      const t = window.keysvr.flow.testerMic.stats;
+      return Object.keys(t).some((key) => t[key] > b[key]);
+    }, before, { timeout: 4000 }).catch(() => {});
+    await wait(200);
+    const after = await stats();
+    const got = Object.keys(after).filter((key) => after[key] > before[key]).join('+') || 'none';
+    const lit = await page.evaluate(() => window.keysvr.flow.shownNotes());
+    console.log(`mic: hand ${c.hand}, sound ${c.sound} → ${got}, lit ${JSON.stringify(lit)}`);
+    if (got !== c.want) errors.push(`mic case ${JSON.stringify(c)} → ${got}`);
+    if (JSON.stringify(lit) !== JSON.stringify(c.lit === null ? [] : [c.lit])) errors.push(`mic case ${JSON.stringify(c)} lit ${JSON.stringify(lit)}`);
     if (c.shot) await shot(c.shot);
     await page.evaluate(() => { window.fakeSoundPlan.offset = null; });
-    await tipTo(up(k, 0.025), 0.15);
-    await wait(900);
+    if (k) await tipTo(up(k, 0.025), 0.15);
+    await wait(1600);
   }
+  // From here on the fake synth sounds every pressed key, like the real one.
+  await page.evaluate(() => { window.fakeSoundPlan.offset = 0; });
 
   const e4 = await synth(() => window.fakeSynth.keyPoint(64, 0.05));
   await tipTo(up(e4, 0.03), 0.4);
@@ -209,6 +218,14 @@ try {
   });
   await page.evaluate(() => { window.fakeSynth.group.visible = true; });
   console.log('render stats:', JSON.stringify(info));
+
+  // Back to calibration from the tester: tester buttons must disappear (they covered the text).
+  await pokeButton('Калибровка');
+  await wait(500);
+  await expectStep('touchLeft');
+  const leftover = await page.evaluate(() => ['Калибровка', 'Микр.: вкл'].filter((l) => window.keysvr.panel.buttonByLabel(l)));
+  if (leftover.length) errors.push('tester buttons left on the calibration panel: ' + leftover.join(', '));
+  await shot('10-recalibrate');
 
   // New session: the saved calibration should come back.
   await page.reload({ waitUntil: 'networkidle' });

@@ -25,3 +25,8 @@
 - [ok] Overall works well; two-key verify and labels accepted.
 - [bug] Tracked fingertip sits on the finger pad, not the finger end → presses with the very tip may not register.
 - [bug] Bending one finger alone (ring) — the virtual finger does not bend (stays straight).
+
+## 2026-11-08 — stage 2 (mic) on Quest 3
+- [bug] Mic hears nothing: "не услышал" 139 of 139 presses.
+- [bug] Key detection ~20% accurate: ring-finger press often not shown; a hovering pinky (cm above the keys) lights a key.
+- [bug] Pressing "Калибровка" from the tester: tester buttons stay on the panel and cover the calibration instruction.

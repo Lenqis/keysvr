@@ -1,83 +1,107 @@
 import type { Mic } from '../audio/mic';
-import { PressChecker } from '../audio/pressChecker';
-import type { Verdict } from '../audio/noteJudge';
+import { MicKeys } from '../audio/micKeys';
+import { PressFusion, type Shown } from '../audio/fusion';
+import type { KeyEvent } from '../hands/keyPress';
 import type { KeyboardCalibration } from './keyboardFrame';
-import { noteNameRu } from './keyboardModel';
+import { noteNameRu, noteLabel } from './keyboardModel';
 
 const GREEN = '#8af59a';
 const ORANGE = '#ffb36b';
 const GREY = '#a3a9c9';
+const USE_KEY = 'keysvr.useMic';
 
 /**
- * Key tester + microphone: after each hand press the mic checks which of the
- * nearby keys really sounded and fixes the key if the hand was off.
- * If the mic hears nothing, the hand result stays (decision "mode A").
+ * Key tester with the microphone: the mic listens to every key all the time and
+ * decides which key sounded; the hands only tell which finger pressed it.
+ * Without a working mic (or switched off) the hands alone decide.
  */
 export class TesterMic {
-  private checker: PressChecker | null = null;
-  /** tipId → key the mic says is really held (differs from the hand's key) */
-  readonly corrections = new Map<string, number>();
-  private last: { verdict: Verdict | null } | null = null;
-
   /** emulator only: the fake synth sounds a note when the hand presses a key */
   static devPressHook: ((midi: number) => void) | null = null;
+  readonly fusion = new PressFusion();
+  private keys: MicKeys | null = null;
+  private range: [number, number] = [36, 96];
+  private last: Shown | null = null;
+  useMic = localStorage.getItem(USE_KEY) !== 'off';
 
   constructor(private readonly mic: Mic) {}
 
   get stats() {
-    return this.checker?.stats ?? { match: 0, corrected: 0, silent: 0 };
+    return this.fusion.stats;
+  }
+
+  private get listening(): boolean {
+    return this.useMic && this.mic.state === 'on';
   }
 
   reset(cal: KeyboardCalibration): void {
-    const lo = () => cal.range.lowestMidi;
-    const hi = () => cal.range.lowestMidi + cal.range.keyCount - 1;
-    this.checker = new PressChecker(this.mic, lo, hi);
-    this.corrections.clear();
+    const lo = cal.range.lowestMidi;
+    this.range = [lo, lo + cal.range.keyCount - 1];
+    this.keys = null;
+    this.fusion.setMic(this.listening);
     this.last = null;
   }
 
-  onPress(tipId: string, midi: number): void {
-    this.corrections.delete(tipId);
-    this.last = { verdict: null };
-    TesterMic.devPressHook?.(midi);
-    if (this.mic.state === 'on') this.checker?.onPress(tipId, midi);
+  toggle(): Shown[] {
+    this.useMic = !this.useMic;
+    localStorage.setItem(USE_KEY, this.useMic ? 'on' : 'off');
+    return this.fusion.setMic(this.listening);
   }
 
-  onRelease(tipId: string): number | undefined {
-    const m = this.corrections.get(tipId);
-    this.corrections.delete(tipId);
-    return m;
-  }
-
-  /** Verdicts that just arrived; corrected ones are recorded for held tips. */
-  update(held: Map<string, number>): { tipId: string; verdict: Verdict }[] {
-    if (!this.checker || this.mic.state !== 'on') return [];
-    const done = this.checker.update();
-    for (const d of done) {
-      this.last = { verdict: d.verdict };
-      if (d.verdict.kind === 'corrected' && held.get(d.tipId) === d.verdict.handMidi) {
-        this.corrections.set(d.tipId, d.verdict.midi);
-      }
+  /** Hand events + mic analysis → keys to light / unlight. */
+  update(events: KeyEvent[]): Shown[] {
+    if (this.fusion.micOn !== this.listening) this.fusion.setMic(this.listening);
+    const t = this.mic.now / this.mic.sampleRate;
+    const out: Shown[] = [];
+    for (const e of events) {
+      if (e.type === 'down') {
+        TesterMic.devPressHook?.(e.midi);
+        out.push(...this.fusion.handDown(e.tipId, e.midi, t));
+      } else out.push(...this.fusion.handUp(e.tipId, t));
     }
-    return done;
+    if (this.listening && !this.keys) this.keys = new MicKeys(this.mic, ...this.range);
+    if (this.listening && this.keys) {
+      const r = this.keys.update();
+      for (const o of r.onsets) out.push(...this.fusion.micOnset(o));
+      for (const m of r.releases) out.push(...this.fusion.micRelease(m));
+      out.push(...this.fusion.update(this.keys.time));
+    }
+    for (const s of out) if (s.type === 'down') this.last = s;
+    return out;
   }
 
-  /** Line under the note name: what hands and mic said about the last press. */
+  panelView() {
+    return { verdict: this.verdictLine(), hear: this.hearLine(), stats: this.statsLine(), button: this.micButton() };
+  }
+
+  /** Line under the note name: who detected the last key. */
   verdictLine(): { text: string; color: string } {
-    if (this.mic.state !== 'on') return { text: `Руки ✓ · ${this.offText()}`, color: GREEN };
-    const v = this.last?.verdict;
-    if (!v) return { text: 'Руки ✓ · микрофон слушает…', color: GREY };
-    if (v.kind === 'match') return { text: 'Руки ✓ · Микрофон ✓', color: GREEN };
-    if (v.kind === 'silent') return { text: 'Руки ✓ · микрофон не услышал', color: ORANGE };
-    return { text: `Руки: ${noteNameRu(v.handMidi)} → микрофон: ${noteNameRu(v.midi)} (исправлено)`, color: ORANGE };
+    const s = this.last;
+    if (!this.listening) return { text: `Только руки · ${this.offText()}`, color: GREY };
+    if (!s || s.type !== 'down') return { text: 'Нажимай клавиши — микрофон слушает', color: GREY };
+    if (s.tipId === null) return { text: 'Микрофон ✓ · руки не увидели нажатие', color: ORANGE };
+    if (s.handMidi === s.midi) return { text: 'Руки ✓ · Микрофон ✓', color: GREEN };
+    return { text: `Руки: ${noteNameRu(s.handMidi!)} → микрофон: ${noteNameRu(s.midi)} (исправлено)`, color: ORANGE };
   }
 
-  /** "Микрофон 12% · совпало 5 · исправлено 1 · не услышал 0" */
-  statsLine(): string {
+  /** What the mic hears right now — shows at a glance whether it works at all. */
+  hearLine(): string {
     if (this.mic.state !== 'on') return this.offText();
-    const s = this.stats;
+    const l = this.keys?.loudest;
     const lvl = Math.min(99, Math.round(this.mic.level * 300));
-    return `Микрофон ${lvl}% · совпало ${s.match} · исправлено ${s.corrected} · не услышал ${s.silent}`;
+    return l ? `Слышу: ${noteLabel(l.midi)} · громкость ${lvl}%` : `Слышу: тишина · громкость ${lvl}%`;
+  }
+
+  /** "совпало 5 · исправлено 1 · только микрофон 2 · руки без звука 3" */
+  statsLine(): string {
+    if (!this.listening) return ' ';
+    const s = this.stats;
+    return `совпало ${s.match} · исправлено ${s.corrected} · только микр. ${s.micOnly} · руки без звука ${s.handOnly}`;
+  }
+
+  micButton(): string {
+    if (this.mic.state !== 'on') return 'Микр.: нет';
+    return this.useMic ? 'Микр.: вкл' : 'Микр.: выкл';
   }
 
   private offText(): string {
@@ -85,7 +109,8 @@ export class TesterMic {
       case 'denied': return 'микрофон запрещён в браузере';
       case 'error': return 'микрофон недоступен';
       case 'starting': return 'микрофон включается…';
-      default: return 'микрофон выключен';
+      case 'on': return 'микрофон выключен кнопкой';
+      default: return 'микрофон не включён на стартовой странице';
     }
   }
 }
