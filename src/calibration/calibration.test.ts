@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { DEFAULT_PRESET, buildLayout, keyAt, noteLabel, whiteCount, MIDDLE_C, KEY_PRESETS, isBlack } from './keyboardModel';
 import { KeyboardCalibration, TIP_ABOVE_SURFACE, frameFromPoints } from './keyboardFrame';
-import { KeyPressDetector, PRESS_DEPTH } from '../hands/keyPress';
+import { KeyPressDetector } from '../hands/keyPress';
 
 const PITCH = 0.0235;
 
@@ -60,6 +60,7 @@ describe('keyboardFrame', () => {
 });
 
 describe('KeyPressDetector', () => {
+  const DT = 1 / 72;
   const setup = () => {
     const { base, span } = frameFromPoints(new THREE.Vector3(0, 0.8, -0.4), new THREE.Vector3(35 * PITCH, 0.8, -0.4));
     const cal = new KeyboardCalibration(base, span, DEFAULT_PRESET);
@@ -67,24 +68,32 @@ describe('KeyPressDetector', () => {
     // world point above middle C, `depth` metres below the white-key top
     const surface = 0.8 - TIP_ABOVE_SURFACE;
     const atC4 = (depth: number) => new Map([['r-index', new THREE.Vector3(14 * PITCH, surface - depth, -0.43)]]);
-    return { det, atC4 };
+    /** feed a sequence of depths, return all events */
+    const run = (depths: number[]) => depths.flatMap((d) => det.update(atC4(d), DT));
+    return { det, run };
   };
 
-  it('fires down on press and up on release', () => {
-    const { det, atC4 } = setup();
-    expect(det.update(atC4(-0.01))).toEqual([]);
-    expect(det.update(atC4(PRESS_DEPTH + 0.002))).toEqual([{ type: 'down', midi: 60, tipId: 'r-index' }]);
-    expect(det.update(atC4(PRESS_DEPTH + 0.003))).toEqual([]);
-    expect(det.update(atC4(-0.005))).toEqual([{ type: 'up', midi: 60, tipId: 'r-index' }]);
+  it('fires down on a stroke and up on release, reporting the deepest point', () => {
+    const { run } = setup();
+    const ev = run([-0.01, -0.006, -0.002, 0.002, 0.006, 0.009, 0.009, 0.004, -0.004]);
+    expect(ev.map((e) => `${e.type}:${e.midi}`)).toEqual(['down:60', 'up:60']);
+    expect(ev[1].maxDepth).toBeCloseTo(0.009, 6);
   });
 
   it('ignores a fingertip resting on the key surface (tracking noise)', () => {
-    const { det, atC4 } = setup();
-    for (let i = 0; i < 20; i++) expect(det.update(atC4(i % 2 ? 0.003 : -0.002))).toEqual([]);
+    const { run } = setup();
+    const depths = Array.from({ length: 60 }, (_, i) => 0.003 + (i % 2 ? 0.004 : -0.003));
+    expect(run(depths)).toEqual([]);
   });
 
   it('ignores a tip that appears already deep (hand under the keyboard)', () => {
-    const { det, atC4 } = setup();
-    expect(det.update(atC4(0.02))).toEqual([]);
+    const { run } = setup();
+    expect(run([0.02, 0.02])).toEqual([]);
+  });
+
+  it('a lower press threshold catches shallow presses', () => {
+    const { det, run } = setup();
+    det.pressDepth = 0;
+    expect(run([-0.012, -0.006, 0.001]).map((e) => e.type)).toEqual(['down']);
   });
 });

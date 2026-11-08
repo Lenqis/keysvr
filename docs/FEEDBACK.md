@@ -8,3 +8,9 @@
 
 ## 2026-11-08 — round 1 fixes re-tested on Quest 3
 - [ok] Ring finger presses reliably with the pinky nearby; hand smoothing/fade and fingertip dots accepted.
+
+## 2026-11-08 — stage 1 (calibration + key tester) on Quest 3
+- [bug] Calibration step: touching with the LEFT index captured the RIGHT index resting somewhere below.
+- [change] "передний край самой правой клавиши" is unclear — needs a clearer instruction/picture.
+- [bug] Tester: pressing several keys at once — note labels glitch and stick together.
+- [bug] Tester: sometimes the wrong key, sometimes no detection, sometimes detection before the finger actually pressed.

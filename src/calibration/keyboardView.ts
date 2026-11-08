@@ -15,7 +15,7 @@ export class KeyboardView {
   readonly group = new THREE.Group();
   private fills: THREE.InstancedMesh | null = null;
   private outline: THREE.LineSegments | null = null;
-  private readonly labels: CanvasPlane[] = [];
+  private readonly labels = new Map<string, CanvasPlane>();
   private readonly colors = new Map<number, THREE.Color>();
   private index = new Map<number, number>();
   private baseMatrices: THREE.Matrix4[] = [];
@@ -89,33 +89,49 @@ export class KeyboardView {
     for (const midi of [...this.colors.keys()]) this.setKeyColor(midi, null);
   }
 
-  /** Floating note names over the given keys (pooled labels). */
-  showLabels(notes: { midi: number; color: string }[]): void {
-    while (this.labels.length < notes.length) {
-      const l = new CanvasPlane(0.095, 0.04, 2000);
-      l.mesh.renderOrder = 6;
-      this.labels.push(l);
-      this.group.add(l.mesh);
+  /**
+   * Floating note names over held keys. Each fingertip keeps its own label
+   * (no swapping/redrawing between frames); labels of nearby keys are stacked
+   * in rows so they never overlap.
+   */
+  showLabels(notes: { tipId: string; midi: number; color: string }[]): void {
+    const LW = 0.095, LH = 0.04;
+    const live = new Set(notes.map((n) => n.tipId));
+    for (const [id, l] of this.labels) {
+      if (!live.has(id)) { this.group.remove(l.mesh); this.labels.delete(id); }
     }
-    this.labels.forEach((l, i) => {
-      const n = notes[i];
-      l.mesh.visible = !!n;
-      if (!n) return;
+    const placed: { x: number; row: number }[] = [];
+    const sorted = [...notes].sort((a, b) => this.keyX(a.midi) - this.keyX(b.midi));
+    for (const n of sorted) {
+      let l = this.labels.get(n.tipId);
+      if (!l) {
+        l = new CanvasPlane(LW, LH, 2000);
+        l.mesh.renderOrder = 6;
+        this.labels.set(n.tipId, l);
+        this.group.add(l.mesh);
+      }
       const k = this.cal.layout.keys[this.index.get(n.midi) ?? 0];
-      l.mesh.position.set(k.x, k.top + 0.05, k.zBack + 0.02);
+      let row = 0;
+      while (placed.some((p) => p.row === row && Math.abs(p.x - k.x) < LW + 0.005)) row++;
+      placed.push({ x: k.x, row });
+      l.mesh.position.set(k.x, k.top + 0.05 + row * (LH + 0.006), this.cal.layout.keys[0].zBack + 0.02 + row * 0.002);
       const key = `${n.midi}|${n.color}`;
-      if (l.mesh.userData.key === key) return;
+      if (l.mesh.userData.key === key) continue;
       l.mesh.userData.key = key;
       l.draw((ctx, w, h) => {
         roundRect(ctx, 4, 4, w - 8, h - 8, h * 0.3);
-        ctx.fillStyle = 'rgba(13,16,32,0.9)';
+        ctx.fillStyle = 'rgba(13,16,32,0.92)';
         ctx.fill();
         ctx.lineWidth = 6;
         ctx.strokeStyle = n.color;
         ctx.stroke();
         centeredText(ctx, noteLabel(n.midi), w / 2, h / 2 + 2, h * 0.5, '#ffffff', 700);
       });
-    });
+    }
+  }
+
+  private keyX(midi: number): number {
+    return this.cal.layout.keys[this.index.get(midi) ?? 0].x;
   }
 
   /** Follow the calibration pose (anchor updates, nudges). Call every frame. */

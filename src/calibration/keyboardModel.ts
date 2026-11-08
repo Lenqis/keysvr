@@ -22,6 +22,8 @@ export const KEY_PRESETS: KeyRange[] = [
 ];
 export const DEFAULT_PRESET = KEY_PRESETS.find((p) => p.keyCount === 61)!;
 
+/** Presses this far in front of the calibrated front edge still count (touch point is approximate). */
+const FRONT_GRACE = 0.03;
 const BLACK_PCS = new Set([1, 3, 6, 8, 10]);
 /** Black key shift from the gap between its white neighbours, in white-key pitches. */
 const BLACK_OFFSET: Record<number, number> = { 1: -0.1, 3: 0.1, 6: -0.12, 8: 0, 10: 0.12 };
@@ -87,7 +89,7 @@ export function buildLayout(range: KeyRange, span: number): KeyboardLayout {
 export function keyAt(layout: KeyboardLayout, x: number, z: number): KeyRect | null {
   let white: KeyRect | null = null;
   for (const k of layout.keys) {
-    if (z > k.zFront + 0.01 || z < k.zBack) continue; // 1 cm grace in front of the keys
+    if (z > k.zFront + FRONT_GRACE || z < k.zBack) continue;
     if (Math.abs(x - k.x) > (k.black ? k.width / 2 : layout.pitch / 2)) continue;
     if (k.black) return k;
     white = k;

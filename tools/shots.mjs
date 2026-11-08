@@ -64,6 +64,7 @@ async function enterXR() {
   await page.click('#start');
   await page.waitForFunction(() => window.keysvr.renderer.xr.isPresenting, null, { timeout: 30000 });
   await remote('set_hand_pose', { device: 'hand-right', poseId: 'point' }).catch(() => {});
+  await remote('set_hand_pose', { device: 'hand-left', poseId: 'point' }).catch(() => {});
   await remote('set_transform', { device: 'headset', position: { x: 0, y: 1.32, z: 0.2 } });
   await remote('look_at', { device: 'headset', target: { x: 0, y: 0.9, z: -0.45 } });
   // Park the hand instantly (no downward approach, so it must not be captured).
@@ -84,6 +85,12 @@ try {
 
   const left = await synth(() => window.fakeSynth.left);
   const right = await synth(() => window.fakeSynth.right);
+  // Repro of a reported bug: the other hand comes down and rests still below the
+  // keys (on the lap) — it must NOT be captured as the calibration point.
+  await remote('animate_to', { device: 'hand-left', anchor: 'index-tip', position: { x: -0.15, y: 0.62, z: 0.05 }, orientation: PRESS_POSE, duration: 0.8 });
+  await wait(900);
+  const look = (p) => remote('look_at', { device: 'headset', target: p });
+  await look(left); // people look at the key they touch
   await tipTo(up(left, 0.05), 0.9);
   await tipTo(left, 0.4);
   await wait(1000);
@@ -93,11 +100,15 @@ try {
   await tipTo(up(left, 0.06), 0.3);
   await shot('04-touch-right');
 
+  await look(right);
   await tipTo(up(right, 0.06), 1.4); // realistic speed (< 1.5 m/s keeps tracking "reliable")
   await tipTo(right, 0.4);
   // Software-rendered emulator runs ~2.5x slower than real time: hold longer.
   await page.waitForFunction(() => window.keysvr.flow.step === 'verify', null, { timeout: 8000 }).catch(() => {});
   await expectStep('verify');
+  const lh = await page.evaluate(() => window.keysvr.flow.left);
+  if (Math.abs(lh.y - left.y) > 0.02) errors.push('left point captured from the wrong hand: ' + JSON.stringify(lh));
+  await look({ x: 0, y: 0.9, z: -0.45 });
   await tipTo(up(right, 0.06), 0.3);
   await shot('05-verify');
 
@@ -117,7 +128,17 @@ try {
   await tipTo(up(e4, 0.03), 0.4);
   await tipTo(up(e4, -0.009), 0.2);
   await wait(200);
-  await shot('07-tester-e4');
+  // Left index presses the neighbouring F4 at the same time (two labels side by side).
+  const f4 = await synth(() => window.fakeSynth.keyPoint(65, 0.07));
+  await remote('animate_to', { device: 'hand-left', anchor: 'index-tip', position: up(f4, 0.03), orientation: PRESS_POSE, duration: 0.8 });
+  await wait(900);
+  await remote('animate_to', { device: 'hand-left', anchor: 'index-tip', position: up(f4, -0.009), orientation: PRESS_POSE, duration: 0.2 });
+  await wait(400);
+  const held = await page.evaluate(() => [...window.keysvr.flow.heldNotes()]);
+  console.log('held:', JSON.stringify(held));
+  if (held.length !== 2) errors.push('expected 2 held keys, got ' + JSON.stringify(held));
+  await shot('07-tester-two-keys');
+  await remote('animate_to', { device: 'hand-left', anchor: 'index-tip', position: up(f4, 0.05), orientation: PRESS_POSE, duration: 0.2 });
   const fs4 = await synth(() => window.fakeSynth.keyPoint(66, 0.04));
   await tipTo(up(fs4, 0.03), 0.3);
   await tipTo(up(fs4, -0.009), 0.2);

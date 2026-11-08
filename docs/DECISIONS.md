@@ -25,3 +25,9 @@
 - 2026-11-08 Key press = fingertip ≥6 mm below the key top coming from above; release above 2 mm (hysteresis). Lit keys use normal blending (additive is invisible on white keys).
 - 2026-11-08 Emulator self-review uses a dev-only fake 61-key synth (src/dev/fakeSynth.ts, ?emu only).
 - 2026-11-08 Stage 1 self-review: 8.3/10.
+- 2026-11-08 Calibration capture also requires the fingertip within 22° of the gaze (fixes the resting other hand being captured).
+- 2026-11-08 Calibration text: "поставь палец на самую левую/правую клавишу у ближнего к тебе края" + keyboard sketch with a finger dot.
+- 2026-11-08 Key press = threshold crossing that is part of a real downward stroke (≥8 mm within 0.5 s); release at the key top. Presses up to 3 cm in front of the calibrated front edge count.
+- 2026-11-08 Key-top height auto-tuned in the verify step: the deepest point of the player's middle-C press is taken as key bottom (top = bottom + 9 mm travel). Verify uses threshold 0, tester 5 mm.
+- 2026-11-08 Key detection uses lightly smoothed fingertips (One Euro 3 Hz / β 60); visuals keep the heavier smoothing.
+- 2026-11-08 Note labels are per fingertip and stack in rows when keys are close.

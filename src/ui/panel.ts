@@ -18,6 +18,8 @@ export interface PanelContent {
   titleColor?: string;
   accent?: string;
   lines?: (string | Line)[];
+  /** small keyboard sketch with a finger dot on the near edge of the end key */
+  picture?: 'left' | 'right';
   /** rows of buttons, top to bottom */
   buttons?: ButtonSpec[][];
 }
@@ -26,6 +28,7 @@ const W = 0.5;
 const PAD = 0.02;
 const TITLE_H = 0.05;
 const LINE_H = 0.032;
+const PICTURE_H = 0.085;
 const ROW_H = 0.07;
 const ROW_GAP = 0.014;
 
@@ -41,7 +44,7 @@ export class Panel {
     this.content = content;
     const lines = content.lines ?? [];
     const rows = content.buttons ?? [];
-    const h = PAD * 2 + TITLE_H + lines.length * LINE_H + (rows.length ? PAD : 0) + rows.length * (ROW_H + ROW_GAP);
+    const h = PAD * 2 + TITLE_H + lines.length * LINE_H + (content.picture ? PICTURE_H : 0) + (rows.length ? PAD : 0) + rows.length * (ROW_H + ROW_GAP);
     if (!this.bg || Math.abs(this.bg.heightM - h) > 1e-6) {
       if (this.bg) this.group.remove(this.bg.mesh);
       this.bg = new CanvasPlane(W, h, 2000);
@@ -131,6 +134,7 @@ export class Panel {
         centeredText(ctx, line.text, w / 2, y, parseFloat(ctx.font.split(' ')[1]), line.color ?? '#d5d9f0', line.weight ?? 500);
         y += LINE_H * s;
       }
+      if (c.picture) drawKeyboardSketch(ctx, w / 2, y - LINE_H * s * 0.3, PICTURE_H * s, c.picture);
     });
   }
 }
@@ -143,4 +147,42 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxW: number, size
     px *= 0.95;
     ctx.font = `${weight} ${px}px ${FONT}`;
   }
+}
+
+/**
+ * A mini keyboard seen from above (player at the bottom), the end key in
+ * yellow and a finger dot on its near edge.
+ */
+function drawKeyboardSketch(ctx: CanvasRenderingContext2D, cx: number, top: number, h: number, side: 'left' | 'right'): void {
+  const n = 14;
+  const kh = h * 0.78;
+  const kw = kh * 0.24;
+  const x0 = cx - (n * kw) / 2;
+  const y0 = top + h * 0.05;
+  const end = side === 'left' ? 0 : n - 1;
+  for (let i = 0; i < n; i++) {
+    ctx.fillStyle = i === end ? '#ffd93d' : '#e9e9e4';
+    ctx.fillRect(x0 + i * kw + 1, y0, kw - 2, kh);
+  }
+  const blackAfter = [0, 1, 3, 4, 5, 7, 8, 10, 11, 12]; // C# D# F# G# A# pattern
+  ctx.fillStyle = '#15171c';
+  for (const i of blackAfter) {
+    if (i >= n - 1) continue;
+    ctx.fillRect(x0 + (i + 1) * kw - kw * 0.3, y0, kw * 0.6, kh * 0.6);
+  }
+  // finger dot on the near (bottom) edge of the end key, with a "you" arrow
+  const fx = x0 + end * kw + kw / 2;
+  const fy = y0 + kh - kw * 0.45;
+  ctx.beginPath();
+  ctx.arc(fx, fy, kw * 0.42, 0, Math.PI * 2);
+  ctx.fillStyle = '#ff6b6b';
+  ctx.fill();
+  ctx.lineWidth = kw * 0.12;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+  ctx.font = `600 ${h * 0.16}px ${FONT}`;
+  ctx.fillStyle = '#a3a9c9';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('вид сверху · ты внизу', cx, y0 + kh + h * 0.03);
 }

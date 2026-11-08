@@ -39,6 +39,9 @@ export class HandView {
   private readonly pos = new THREE.Vector3();
   private readonly tips: Record<Finger, THREE.Vector3>;
   private readonly filters = ALL_JOINTS.map(() => new OneEuroVec3());
+  /** Light smoothing for key detection: little lag when moving between keys. */
+  private readonly pressFilters = FINGERS.map(() => new OneEuroVec3(3, 60));
+  private readonly pressTipsOut: Record<Finger, THREE.Vector3>;
   private readonly world = ALL_JOINTS.map(() => new THREE.Vector3());
   private readonly dir = new THREE.Vector3();
   visible = false;
@@ -73,10 +76,13 @@ export class HandView {
     this.object.add(this.spheres, this.bones);
     this.object.visible = false;
     this.tips = Object.fromEntries(FINGERS.map((f) => [f, new THREE.Vector3()])) as Record<Finger, THREE.Vector3>;
+    this.pressTipsOut = Object.fromEntries(FINGERS.map((f) => [f, new THREE.Vector3()])) as Record<Finger, THREE.Vector3>;
   }
 
   /** World-space fingertip positions of this hand (valid only while visible). */
   fingertips(): Record<Finger, THREE.Vector3> { return this.tips; }
+  /** Fingertips with light smoothing, for key-press detection (less lag). */
+  pressTips(): Record<Finger, THREE.Vector3> { return this.pressTipsOut; }
 
   update(dt: number): void {
     const joints = this.hand.joints;
@@ -85,7 +91,13 @@ export class HandView {
     this.visible = !!wrist && wrist.visible;
     this.object.visible = this.visible;
     if (!joints || !this.visible) return;
-    if (!wasVisible) this.filters.forEach((f) => f.reset());
+    if (!wasVisible) [...this.filters, ...this.pressFilters].forEach((f) => f.reset());
+    FINGERS.forEach((f, i) => {
+      const j = joints[FINGER_JOINTS[f].at(-1)!];
+      if (!j) return;
+      j.getWorldPosition(this.pressTipsOut[f]);
+      this.pressFilters[i].filter(this.pressTipsOut[f], dt);
+    });
 
     // Smoothed world positions of all joints.
     ALL_JOINTS.forEach((name, i) => {
