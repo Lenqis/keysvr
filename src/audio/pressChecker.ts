@@ -22,7 +22,7 @@ export class PressChecker {
   constructor(private readonly src: SampleSource, private readonly lo: () => number, private readonly hi: () => number) {}
 
   onPress(tipId: string, handMidi: number): void {
-    this.pending.push({ tipId, handMidi, at: this.src.written });
+    this.pending.push({ tipId, handMidi, at: this.src.now });
   }
 
   /** Verdicts for presses whose audio window is complete. */

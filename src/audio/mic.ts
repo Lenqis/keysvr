@@ -5,10 +5,12 @@ const WORKLET = `
 class Tap extends AudioWorkletProcessor {
   constructor() { super(); this.buf = new Float32Array(1024); this.n = 0; }
   process(inputs) {
+    // No active input → silence: still write zeros so sample indices track real time.
     const ch = inputs[0] && inputs[0][0];
-    if (ch) for (let i = 0; i < ch.length; i++) {
-      this.buf[this.n++] = ch[i];
-      if (this.n === this.buf.length) { this.port.postMessage(this.buf.slice()); this.n = 0; }
+    for (let i = 0; i < 128; i++) {
+      this.buf[this.n++] = ch ? ch[i] : 0;
+      // end = absolute sample frame (audio clock) just after this batch
+      if (this.n === this.buf.length) { this.port.postMessage({ end: currentFrame + i + 1, data: this.buf.slice() }); this.n = 0; }
     }
     return true;
   }
@@ -51,7 +53,7 @@ export class Mic implements SampleSource {
       const tap = new AudioWorkletNode(ctx, 'keysvr-tap', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
       this.sampleRate = ctx.sampleRate;
       this.ring = new Float32Array(Math.round(ctx.sampleRate * RING_SECONDS));
-      tap.port.onmessage = (e: MessageEvent<Float32Array>) => this.push(e.data);
+      tap.port.onmessage = (e: MessageEvent<{ end: number; data: Float32Array }>) => this.push(e.data.end, e.data.data);
       this.input.connect(tap);
       // A silent sink keeps the worklet running on all browsers.
       const mute = ctx.createGain();
@@ -64,14 +66,20 @@ export class Mic implements SampleSource {
     }
   }
 
-  private push(block: Float32Array): void {
+  /** Current sample index on the audio clock (what the mic hears "now"). */
+  get now(): number {
+    return this.ctx ? Math.round(this.ctx.currentTime * this.sampleRate) : this.written;
+  }
+
+  private push(end: number, block: Float32Array): void {
     const len = this.ring.length;
+    const start = end - block.length;
     let sq = 0;
     for (let i = 0; i < block.length; i++) {
-      this.ring[(this.written + i) % len] = block[i];
+      this.ring[(start + i) % len] = block[i];
       sq += block[i] * block[i];
     }
-    this.written += block.length;
+    this.written = end;
     const rms = Math.sqrt(sq / block.length);
     this.level = Math.max(rms, this.level * 0.9);
   }

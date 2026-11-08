@@ -19,6 +19,9 @@ export class TesterMic {
   readonly corrections = new Map<string, number>();
   private last: { verdict: Verdict | null } | null = null;
 
+  /** emulator only: the fake synth sounds a note when the hand presses a key */
+  static devPressHook: ((midi: number) => void) | null = null;
+
   constructor(private readonly mic: Mic) {}
 
   get stats() {
@@ -36,6 +39,7 @@ export class TesterMic {
   onPress(tipId: string, midi: number): void {
     this.corrections.delete(tipId);
     this.last = { verdict: null };
+    TesterMic.devPressHook?.(midi);
     if (this.mic.state === 'on') this.checker?.onPress(tipId, midi);
   }
 

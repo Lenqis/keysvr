@@ -3,8 +3,10 @@ import { notePower, windowFor } from './goertzel';
 /** Read access to recent mic samples, indexed by absolute sample number. */
 export interface SampleSource {
   readonly sampleRate: number;
-  /** total samples received so far */
+  /** absolute index just after the last received sample */
   readonly written: number;
+  /** absolute index of the sample being heard right now (audio clock) */
+  readonly now: number;
   /** copies samples [from, from+n) into out; false if not (or no longer) buffered */
   read(from: number, n: number, out: Float32Array): boolean;
 }

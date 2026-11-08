@@ -25,4 +25,11 @@ export function fakeSound(midi: number, seconds = 1): void {
   }
 }
 
-(window as unknown as { fakeSound: typeof fakeSound }).fakeSound = fakeSound;
+/** What the fake synth really sounds when the hand presses a key: offset in semitones, null = silent. */
+const plan = { offset: null as number | null };
+
+export function fakePressSound(midi: number): void {
+  if (plan.offset !== null) fakeSound(midi + plan.offset);
+}
+
+Object.assign(window, { fakeSound, fakeSoundPlan: plan });

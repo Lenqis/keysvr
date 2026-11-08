@@ -160,17 +160,20 @@ try {
   for (const c of micCases) {
     const before = await page.evaluate(() => ({ ...window.keysvr.flow.testerMic.stats }));
     const k = await synth((m) => window.fakeSynth.keyPoint(m, 0.05), c.hand);
+    // The fake synth sounds at the moment of the press (as a real key bottoming out).
+    await page.evaluate((o) => { window.fakeSoundPlan.offset = o; }, c.sound === null ? null : c.sound - c.hand);
     await tipTo(up(k, 0.025), 0.4);
     await remote('animate_to', { device: 'hand-right', anchor: 'index-tip', position: up(k, -0.008), orientation: PRESS_POSE, duration: 0.15 });
-    await wait(130);
-    if (c.sound !== null) await page.evaluate((m) => window.fakeSound(m), c.sound);
-    await wait(700);
+    const sum = (o) => o.match + o.corrected + o.silent;
+    await page.waitForFunction((n) => { const t = window.keysvr.flow.testerMic.stats; return t.match + t.corrected + t.silent > n; }, sum(before), { timeout: 4000 }).catch(() => {});
+    await wait(150);
     const after = await page.evaluate(() => ({ ...window.keysvr.flow.testerMic.stats }));
     const got = Object.keys(after).find((key) => after[key] > before[key]) ?? 'none';
     const held = await page.evaluate(() => window.keysvr.flow.heldNotes());
     console.log(`mic: hand ${c.hand}, sound ${c.sound} → ${got}`);
     if (got !== c.want) errors.push(`mic case ${JSON.stringify(c)} → ${got}, held ${JSON.stringify(held)}`);
     if (c.shot) await shot(c.shot);
+    await page.evaluate(() => { window.fakeSoundPlan.offset = null; });
     await tipTo(up(k, 0.025), 0.15);
     await wait(900);
   }

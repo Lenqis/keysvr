@@ -27,6 +27,7 @@ function render(seconds: number, notes: { midi: number; onset: number; amp?: num
 const source = (data: Float32Array): SampleSource => ({
   sampleRate: SR,
   written: data.length,
+  now: data.length,
   read(from, n, out) {
     if (from < 0 || from + n > data.length) return false;
     out.set(data.subarray(from, from + n));

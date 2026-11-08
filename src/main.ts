@@ -22,8 +22,10 @@ async function boot(): Promise<void> {
   if (emu) {
     const { addFakeSynth } = await import('./dev/fakeSynth');
     addFakeSynth(app.scene);
-    const { fakeMicSource } = await import('./dev/fakeSound');
+    const { fakeMicSource, fakePressSound } = await import('./dev/fakeSound');
+    const { TesterMic } = await import('./calibration/testerMic');
     app.micSource = fakeMicSource;
+    TesterMic.devPressHook = fakePressSound;
   }
   (window as unknown as { keysvr: App }).keysvr = app; // handle for test scripts
 
