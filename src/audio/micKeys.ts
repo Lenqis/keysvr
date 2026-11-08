@@ -22,6 +22,10 @@ export class MicKeys {
     return this.lastEnd / this.src.sampleRate;
   }
 
+  riseNear(midi: number, t: number): number | null {
+    return this.tracker.riseNear(midi, t);
+  }
+
   /** Analyses every 25 ms step of new audio (catches up after slow frames, max 1.5 s). */
   update(): { onsets: Onset[]; releases: number[] } {
     const step = Math.round(TICK * this.src.sampleRate);

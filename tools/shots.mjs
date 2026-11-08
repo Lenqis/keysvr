@@ -156,18 +156,22 @@ try {
     { hand: 72, sound: 70, want: 'corrected', lit: 70 },
     { hand: 48, sound: 49, want: 'corrected', lit: 49 },
     { hand: 62, sound: null, want: 'handOnly', lit: null }, // hovering finger, no sound → not lit
-    { hand: null, sound: 65, want: 'micOnly', lit: 65, shot: '08c-tester-mic-only' }, // hands missed it
+    { hover: 65, sound: 65, want: 'micOnly', lit: 65, shot: '08c-tester-mic-only' }, // finger there, press missed
+    { hover: 40, sound: 80, want: 'noise', lit: null }, // sound far from any finger = room noise
   ];
   const stats = () => page.evaluate(() => ({ ...window.keysvr.flow.testerMic.stats }));
   for (const c of micCases) {
     const before = await stats();
-    const k = c.hand === null ? null : await synth((m) => window.fakeSynth.keyPoint(m, 0.05), c.hand);
-    if (k) {
+    const k = await synth((m) => window.fakeSynth.keyPoint(m, 0.05), c.hand ?? c.hover);
+    if (c.hand) {
       // The fake synth sounds at the moment of the press (as a real key bottoming out).
       await page.evaluate((o) => { window.fakeSoundPlan.offset = o; }, c.sound === null ? null : c.sound - c.hand);
       await tipTo(up(k, 0.025), 0.4);
       await remote('animate_to', { device: 'hand-right', anchor: 'index-tip', position: up(k, -0.008), orientation: PRESS_POSE, duration: 0.15 });
-    } else await page.evaluate((m) => window.fakeSound(m, 5), c.sound);
+    } else {
+      await tipTo(up(k, 0.025), 0.4); // hovering 2.5 cm above, no press
+      await page.evaluate((m) => window.fakeSound(m, 5), c.sound);
+    }
     await page.waitForFunction((b) => {
       const t = window.keysvr.flow.testerMic.stats;
       return Object.keys(t).some((key) => t[key] > b[key]);
@@ -181,7 +185,7 @@ try {
     if (JSON.stringify(lit) !== JSON.stringify(c.lit === null ? [] : [c.lit])) errors.push(`mic case ${JSON.stringify(c)} lit ${JSON.stringify(lit)}`);
     if (c.shot) await shot(c.shot);
     await page.evaluate(() => { window.fakeSoundPlan.offset = null; });
-    if (k) await tipTo(up(k, 0.025), 0.15);
+    await tipTo(up(k, 0.025), 0.15);
     await wait(1600);
   }
   // From here on the fake synth sounds every pressed key, like the real one.

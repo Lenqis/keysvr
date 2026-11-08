@@ -28,6 +28,8 @@ export class PressFusion {
   private mics: Onset[] = [];
   private active: Active[] = [];
   private seq = 0;
+  /** Hand-guided mic lookup for presses no onset matched (key that sounded near midi at t). */
+  guide: ((midi: number, t: number) => number | null) | null = null;
 
   /** Switches mic use; everything shown is released. */
   setMic(on: boolean): Shown[] {
@@ -76,8 +78,12 @@ export class PressFusion {
     }
     this.mics = this.mics.filter((m) => t - m.t <= MATCH_WINDOW);
     const stale = this.hands.filter((h) => t - h.t > MATCH_WINDOW);
-    this.stats.handOnly += stale.length;
     this.hands = this.hands.filter((h) => t - h.t <= MATCH_WINDOW);
+    for (const h of stale) {
+      const midi = this.guide?.(h.midi, h.t) ?? null;
+      if (midi === null || this.active.some((a) => a.midi === midi)) { this.stats.handOnly++; continue; }
+      out.push(...this.show(h, midi, t));
+    }
     for (const a of [...this.active]) if (a.until !== null && t >= a.until) out.push(...this.release(a));
     return out;
   }
@@ -104,13 +110,19 @@ export class PressFusion {
       const { h, o } = best;
       this.hands = this.hands.filter((x) => x !== h);
       this.mics = this.mics.filter((x) => x !== o);
-      if (h.midi === o.midi) this.stats.match++;
-      else this.stats.corrected++;
-      // Same finger may still show an older note: replace it.
-      for (const a of this.active.filter((x) => x.tipId === h.tipId)) out.push(...this.release(a));
-      this.active.push({ id: h.tipId, midi: o.midi, tipId: h.tipId, until: h.upAt === null ? null : t + MIN_SHOW });
-      out.push({ type: 'down', id: h.tipId, midi: o.midi, tipId: h.tipId, handMidi: h.midi });
+      out.push(...this.show(h, o.midi, t));
     }
+  }
+
+  private show(h: HandPress, midi: number, t: number): Shown[] {
+    const out: Shown[] = [];
+    if (h.midi === midi) this.stats.match++;
+    else this.stats.corrected++;
+    // Same finger may still show an older note: replace it.
+    for (const a of this.active.filter((x) => x.tipId === h.tipId)) out.push(...this.release(a));
+    this.active.push({ id: h.tipId, midi, tipId: h.tipId, until: h.upAt === null ? null : t + MIN_SHOW });
+    out.push({ type: 'down', id: h.tipId, midi, tipId: h.tipId, handMidi: h.midi });
+    return out;
   }
 
   private release(a: Active): Shown[] {

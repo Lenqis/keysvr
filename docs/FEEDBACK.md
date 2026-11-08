@@ -30,3 +30,6 @@
 - [bug] Mic hears nothing: "не услышал" 139 of 139 presses.
 - [bug] Key detection ~20% accurate: ring-finger press often not shown; a hovering pinky (cm above the keys) lights a key.
 - [bug] Pressing "Калибровка" from the tester: tester buttons stay on the panel and cover the calibration instruction.
+
+## 2026-11-08 — round 5 (continuous mic) on Quest 3
+- [bug] Mic picks up room/background sounds and maps them to notes; real key presses heard in < 50 % of cases.

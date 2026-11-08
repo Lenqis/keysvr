@@ -18,20 +18,27 @@ const HARMONIC_DB = 9;
 const RELEASE_DROP = 20;
 const RELEASE_FLOOR = 8;
 const FLOOR_RISE_PER_S = 3;
+/** Share of settle frames in which a candidate must look like a steady note. */
+const STEADY = 0.75;
+/** Hand-guided search: a smaller rise is enough where a finger just pressed (dB). */
+const GUIDED_RISE = 6;
 /** The fundamental must carry at least this share of the note (dB below the harmonic sum). */
 const FUND_MIN = 13;
 /** Candidates far below the loudest key in the frame are side-lobe noise (dB). */
 const BELOW_MAX = 30;
+/** Broadband sounds (knocks, steps, rustle) raise all keys alike; a note stands out of the median (dB). */
+const ABOVE_MEDIAN = 12;
 
 interface KeyState {
-  hist: { t: number; db: number }[];
+  /** last second: loudness and whether it looked like a note (own fundamental, local peak) */
+  hist: { t: number; db: number; tonal: boolean }[];
   floor: number;
   on: boolean;
   peak: number;
   lastOnset: number;
 }
 
-interface Cand extends Onset { peak: number; dropped: boolean; final: boolean }
+interface Cand extends Onset { peak: number; dropped: boolean; final: boolean; seen: number; tonal: number }
 
 /**
  * Finds note starts in a stream of per-key loudness frames: a fast rise well above the
@@ -53,6 +60,7 @@ export class OnsetTracker {
     const dt = this.lastT === null ? 0 : t - this.lastT;
     this.lastT = t;
     const releases: number[] = [];
+    const median = [...Array.from(db)].sort((a, b) => a - b)[db.length >> 1];
     let max = -Infinity;
     let maxFund = -Infinity;
     for (let i = 0; i < this.keys.length; i++) {
@@ -63,7 +71,7 @@ export class OnsetTracker {
     const noteLike = (i: number) => {
       let nb = -Infinity;
       for (let j = Math.max(0, i - 2); j <= Math.min(db.length - 1, i + 2); j++) if (j !== i) nb = Math.max(nb, db[j]);
-      return db[i] > -100 && db[i] >= max - BELOW_MAX && fundDb[i] >= db[i] - FUND_MIN &&
+      return db[i] > -100 && db[i] >= median + ABOVE_MEDIAN && db[i] >= max - BELOW_MAX && fundDb[i] >= db[i] - FUND_MIN &&
         fundDb[i] >= maxFund - BELOW_MAX + 5 && db[i] >= nb - NEIGHBOUR_DB;
     };
     this.noteLike = noteLike;
@@ -74,11 +82,16 @@ export class OnsetTracker {
       k.floor = Number.isNaN(k.floor) || d < k.floor ? d : k.floor + FLOOR_RISE_PER_S * dt;
       let min = Infinity;
       for (const h of k.hist) if (h.t >= t - 0.3 && h.t <= t - 0.06) min = Math.min(min, h.db);
-      k.hist.push({ t, db: d });
-      while (k.hist.length && k.hist[0].t < t - 0.35) k.hist.shift();
+      const tonal = noteLike(i);
+      k.hist.push({ t, db: d, tonal });
+      while (k.hist.length && k.hist[0].t < t - 1) k.hist.shift();
 
       const pending = this.cands.find((c) => c.midi === midi && !c.final);
-      if (pending) pending.peak = Math.max(pending.peak, d);
+      if (pending) {
+        pending.peak = Math.max(pending.peak, d);
+        pending.seen++;
+        if (tonal) pending.tonal++;
+      }
       if (k.on) {
         k.peak = Math.max(k.peak, d);
         if (d < k.peak - RELEASE_DROP || d < k.floor + RELEASE_FLOOR) {
@@ -86,12 +99,32 @@ export class OnsetTracker {
           releases.push(midi);
         }
       }
-      if (min !== Infinity && d - min >= RISE && d >= k.floor + ABOVE_FLOOR && noteLike(i) && !k.on && !pending && t - k.lastOnset > REFRACTORY) {
+      if (min !== Infinity && d - min >= RISE && d >= k.floor + ABOVE_FLOOR && tonal && !k.on && !pending && t - k.lastOnset > REFRACTORY) {
         k.lastOnset = t;
-        this.cands.push({ midi, t, db: d, peak: d, dropped: false, final: false });
+        this.cands.push({ midi, t, db: d, peak: d, dropped: false, final: false, seen: 1, tonal: 1 });
       }
     });
     return { onsets: this.settle(t), releases };
+  }
+
+  /**
+   * Hand-guided lookup: the key near `midi` that started a steady tone around time `t`
+   * (sound may come up to 0.25 s before the hand press is seen). Lower bar than onsets.
+   */
+  riseNear(midi: number, t: number, spread = 2): number | null {
+    let best: { midi: number; db: number } | null = null;
+    for (let m = Math.max(this.lo, midi - spread); m <= Math.min(this.hi, midi + spread); m++) {
+      let pre = Infinity;
+      let post = -Infinity;
+      for (const h of this.keys[m - this.lo].hist) {
+        if (h.t >= t - 0.6 && h.t <= t - 0.25) pre = Math.min(pre, h.db);
+        if (h.t > t - 0.25 && h.t <= t + 0.35 && h.tonal) post = Math.max(post, h.db);
+      }
+      if (pre === Infinity || post - pre < GUIDED_RISE) continue;
+      const score = post - Math.abs(m - midi) * 3;
+      if (!best || score > best.db) best = { midi: m, db: score };
+    }
+    return best?.midi ?? null;
   }
 
   private settle(t: number): Onset[] {
@@ -100,7 +133,8 @@ export class OnsetTracker {
       if (c.final || t - c.t < SETTLE) continue;
       c.final = true;
       // Re-check once the attack click (broadband) has passed.
-      if (!this.noteLike(c.midi - this.lo)) { c.dropped = true; continue; }
+      // A synth note is a steady tone; speech and knocks glide or vanish within the settle time.
+      if (!this.noteLike(c.midi - this.lo) || c.tonal < STEADY * c.seen) { c.dropped = true; continue; }
       const near = this.cands.filter((o) => o !== c && Math.abs(o.t - c.t) <= 0.25);
       const leak = near.some((o) => Math.abs(o.midi - c.midi) <= 2 && o.peak >= c.peak + NEIGHBOUR_DB);
       // A lower note sounding now whose harmonics land on this key (it may have been noticed later).

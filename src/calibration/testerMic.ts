@@ -21,13 +21,24 @@ export class TesterMic {
   readonly fusion = new PressFusion();
   private keys: MicKeys | null = null;
   private range: [number, number] = [36, 96];
+  /** keys with a fingertip just above them during the last second (audio-clock time) */
+  private hover: { t: number; midi: number }[] = [];
+  /** mic notes ignored because no finger was near that key (room noise, voices) */
+  noise = 0;
   private last: Shown | null = null;
   useMic = localStorage.getItem(USE_KEY) !== 'off';
 
-  constructor(private readonly mic: Mic) {}
+  constructor(private readonly mic: Mic) {
+    this.fusion.guide = (midi, t) => this.keys?.riseNear(midi, t) ?? null;
+  }
+
+  /** Only sounds where a finger is (±2 keys, ±0.5 s) can be the synth being played. */
+  private nearFinger(midi: number, t: number): boolean {
+    return this.hover.some((h) => Math.abs(h.midi - midi) <= 2 && Math.abs(h.t - t) <= 0.5);
+  }
 
   get stats() {
-    return this.fusion.stats;
+    return { ...this.fusion.stats, noise: this.noise };
   }
 
   private get listening(): boolean {
@@ -49,10 +60,12 @@ export class TesterMic {
   }
 
   /** Hand events + mic analysis → keys to light / unlight. */
-  update(events: KeyEvent[]): Shown[] {
+  update(events: KeyEvent[], hovering: number[]): Shown[] {
     if (this.fusion.micOn !== this.listening) this.fusion.setMic(this.listening);
     const t = this.mic.now / this.mic.sampleRate;
     const out: Shown[] = [];
+    for (const midi of new Set(hovering)) this.hover.push({ t, midi });
+    this.hover = this.hover.filter((h) => t - h.t <= 1);
     for (const e of events) {
       if (e.type === 'down') {
         TesterMic.devPressHook?.(e.midi);
@@ -62,7 +75,10 @@ export class TesterMic {
     if (this.listening && !this.keys) this.keys = new MicKeys(this.mic, ...this.range);
     if (this.listening && this.keys) {
       const r = this.keys.update();
-      for (const o of r.onsets) out.push(...this.fusion.micOnset(o));
+      for (const o of r.onsets) {
+        if (this.nearFinger(o.midi, o.t)) out.push(...this.fusion.micOnset(o));
+        else this.noise++;
+      }
       for (const m of r.releases) out.push(...this.fusion.micRelease(m));
       out.push(...this.fusion.update(this.keys.time));
     }
@@ -96,7 +112,7 @@ export class TesterMic {
   statsLine(): string {
     if (!this.listening) return ' ';
     const s = this.stats;
-    return `совпало ${s.match} · исправлено ${s.corrected} · только микр. ${s.micOnly} · руки без звука ${s.handOnly}`;
+    return `совпало ${s.match} · испр. ${s.corrected} · только микр. ${s.micOnly} · руки без звука ${s.handOnly} · шум ${this.noise}`;
   }
 
   micButton(): string {
