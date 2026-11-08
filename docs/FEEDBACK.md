@@ -20,3 +20,8 @@
 - [bug] Pressing C with the index sometimes shows a neighbouring key.
 - [bug] Fingertip dots sit deeper than the real fingertips when bending; must press "with almost the whole finger" for a key to register.
 - [bug] Long note names (соль♯ · G#4) overflow the label box.
+
+## 2026-11-08 — round 3 on Quest 3
+- [ok] Overall works well; two-key verify and labels accepted.
+- [bug] Tracked fingertip sits on the finger pad, not the finger end → presses with the very tip may not register.
+- [bug] Bending one finger alone (ring) — the virtual finger does not bend (stays straight).

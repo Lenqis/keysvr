@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FINGER_COLORS, type Finger } from '../hands/handView';
+import { cycleTipExtension, tipExtensionMm } from '../hands/handSettings';
 import { KeyPressDetector, SENSITIVITY, type KeyEvent, type Sensitivity } from '../hands/keyPress';
 import type { Panel } from '../ui/panel';
 import { panelFor } from './flowPanels';
@@ -242,6 +243,7 @@ export class CalibrationFlow {
       lastNote: this.lastNote,
       depthText: this.depthReadout(),
       sensLabel: SENSITIVITY[this.sensitivity].label,
+      tipMm: tipExtensionMm(),
     }, {
       recalibrate: () => this.go('touchLeft'),
       confirm: () => this.go('tester'),
@@ -249,6 +251,7 @@ export class CalibrationFlow {
       cycleKeys: () => this.cycleKeys(),
       finish: () => void this.finish(),
       cycleSensitivity: () => this.cycleSensitivity(),
+      cycleTip: () => { cycleTipExtension(); this.render(); },
     }));
   }
 
