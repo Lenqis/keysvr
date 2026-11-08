@@ -16,7 +16,7 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); if (m.text().startsWith('DBG')) console.log(m.text()); });
 
 const wait = (ms) => page.waitForTimeout(ms);
 const shot = async (name) => {

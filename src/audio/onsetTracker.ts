@@ -134,13 +134,13 @@ export class OnsetTracker {
       c.final = true;
       // Re-check once the attack click (broadband) has passed.
       // A synth note is a steady tone; speech and knocks glide or vanish within the settle time.
-      if (!this.noteLike(c.midi - this.lo) || c.tonal < STEADY * c.seen) { c.dropped = true; continue; }
+      if (!this.noteLike(c.midi - this.lo) || c.tonal < STEADY * c.seen) { console.log('DBG drop-steady', c.midi, c.t.toFixed(2), c.tonal, c.seen, this.noteLike(c.midi - this.lo)); c.dropped = true; continue; }
       const near = this.cands.filter((o) => o !== c && Math.abs(o.t - c.t) <= 0.25);
       const leak = near.some((o) => Math.abs(o.midi - c.midi) <= 2 && o.peak >= c.peak + NEIGHBOUR_DB);
       // A lower note sounding now whose harmonics land on this key (it may have been noticed later).
       const i = c.midi - this.lo;
       const harmonic = HARMONIC_STEPS.some((st) => i - st >= 0 && this.frame[i - st] >= this.frame[i] - HARMONIC_DB && this.noteLike(i - st));
-      if (leak || harmonic) { c.dropped = true; continue; }
+      if (leak || harmonic) { console.log('DBG drop', leak ? 'leak' : 'harm', c.midi, c.t.toFixed(2)); c.dropped = true; continue; }
       const k = this.keys[c.midi - this.lo];
       k.on = true;
       k.peak = c.peak;
