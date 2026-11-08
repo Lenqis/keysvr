@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OneEuroVec3 } from './oneEuro';
+import { tipExtensionMm } from './handSettings';
 
 /** Finger colors — also used later for note colors (one color per finger). */
 export const FINGER_COLORS = {
@@ -40,7 +41,10 @@ export class HandView {
   private readonly tmp = new THREE.Matrix4();
   private readonly pos = new THREE.Vector3();
   private readonly tips: Record<Finger, THREE.Vector3>;
-  private readonly filters = ALL_JOINTS.map(() => new OneEuroVec3());
+  // Wrist: steady (drives the "reliable" speed check). Finger joints: light, so
+  // bends show up immediately instead of lagging/looking straight.
+  private readonly filters = ALL_JOINTS.map((name) => (name === 'wrist' ? new OneEuroVec3() : new OneEuroVec3(2.5, 50)));
+  private readonly distal = new THREE.Vector3();
   /** Light smoothing for key detection: little lag when moving between keys. */
   private readonly pressFilters = FINGERS.map(() => new OneEuroVec3(3, 60));
   private readonly pressTipsOut: Record<Finger, THREE.Vector3>;
@@ -96,8 +100,14 @@ export class HandView {
     if (!wasVisible) [...this.filters, ...this.pressFilters].forEach((f) => f.reset());
     FINGERS.forEach((f, i) => {
       const j = joints[FINGER_JOINTS[f].at(-1)!];
-      if (!j) return;
+      const d = joints[FINGER_JOINTS[f].at(-2)!];
+      if (!j || !d) return;
       j.getWorldPosition(this.pressTipsOut[f]);
+      // Extend the tip along the last phalanx: Quest's tip joint tends to sit on
+      // the finger pad, short of the real finger end.
+      d.getWorldPosition(this.distal);
+      this.dir.copy(this.pressTipsOut[f]).sub(this.distal).normalize();
+      this.pressTipsOut[f].addScaledVector(this.dir, tipExtensionMm() / 1000);
       this.pressFilters[i].filter(this.pressTipsOut[f], dt);
     });
 

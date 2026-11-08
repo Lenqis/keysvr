@@ -16,6 +16,7 @@ export interface FlowView {
   lastNote: { midi: number; color: string } | null;
   depthText: string;
   sensLabel: string;
+  tipMm: number;
 }
 
 export interface FlowActions {
@@ -25,6 +26,7 @@ export interface FlowActions {
   cycleKeys(): void;
   finish(): void;
   cycleSensitivity(): void;
+  cycleTip(): void;
 }
 
 /** Panel texts and buttons for each calibration / tester step. */
@@ -93,10 +95,13 @@ export function panelFor(v: FlowView, a: FlowActions): PanelContent {
           note ? { text: 'Руки ✓   Микрофон — на следующем этапе', color: '#8af59a' } : ' ',
           { text: v.depthText, color: '#a3a9c9', size: 0.018 },
         ],
-        buttons: [[
-          { label: 'Калибровка', variant: 'secondary', onPress: a.recalibrate },
-          { label: `Чувствительность: ${v.sensLabel}`, variant: 'secondary', grow: 1.8, onPress: a.cycleSensitivity },
-        ]],
+        buttons: [
+          [
+            { label: `Чувств.: ${v.sensLabel}`, variant: 'secondary', grow: 1.3, onPress: a.cycleSensitivity },
+            { label: `Кончик: +${v.tipMm} мм`, variant: 'secondary', grow: 1.2, onPress: a.cycleTip },
+          ],
+          [{ label: 'Калибровка', variant: 'secondary', onPress: a.recalibrate }],
+        ],
       };
     }
   }

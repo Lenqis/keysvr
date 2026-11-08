@@ -36,3 +36,5 @@
 - 2026-11-08 Front grace (3 cm) applies to white keys only — on black keys it stole presses from neighbouring white keys.
 - 2026-11-08 Fingertip dots drawn from the lightly smoothed tip, 2 mm inside the finger end.
 - 2026-11-08 Round 3 self-review: 8.4/10; emulator accuracy sweep 10/10 keys after off-centre calibration touches.
+- 2026-11-08 Fingertip = Quest tip joint extended along the last phalanx (default +6 mm, player-tunable 0–12 mm in the tester, saved); Quest's tip sits on the finger pad.
+- 2026-11-08 Finger joints use light smoothing (2.5 Hz / β 50) so single-finger bends show; wrist keeps heavy smoothing for the speed-reliability check. Isolated ring-finger bends remain a Quest tracking limit → mic confirmation (stage 2) is the real fix.
