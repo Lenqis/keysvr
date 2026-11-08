@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FINGER_COLORS, type Finger } from '../hands/handView';
-import { KeyPressDetector, type KeyEvent } from '../hands/keyPress';
+import { KeyPressDetector, PRESS_DEPTH, type KeyEvent } from '../hands/keyPress';
 import type { Panel } from '../ui/panel';
 import { HoldCapture } from './holdCapture';
 import { KeyboardCalibration, frameFromPoints, plausiblePitch } from './keyboardFrame';
@@ -13,6 +13,8 @@ export type Step = 'start' | 'restoring' | 'confirmSaved' | 'touchLeft' | 'touch
 export interface FrameCtx {
   dt: number;
   tips: Map<string, THREE.Vector3>;
+  /** lightly smoothed fingertips for key-press detection */
+  pressTips: Map<string, THREE.Vector3>;
   head: THREE.Vector3;
   forward: THREE.Vector3;
   frame: XRFrame | null;
@@ -20,6 +22,14 @@ export interface FrameCtx {
 }
 
 const NUDGE = 0.003;
+/** Key travel of a typical synth key (m). */
+const KEY_TRAVEL = 0.009;
+
+/** Is `pt` within `deg` degrees of where the player looks? */
+function inGaze(ctx: FrameCtx, pt: THREE.Vector3, deg: number): boolean {
+  const dir = pt.clone().sub(ctx.head).normalize();
+  return dir.dot(ctx.forward) > Math.cos(THREE.MathUtils.degToRad(deg));
+}
 const YELLOW = '#ffd93d';
 const fingerOf = (tipId: string) => tipId.split('-')[1] as Finger;
 const fingerHex = (tipId: string) => `#${FINGER_COLORS[fingerOf(tipId)].toString(16).padStart(6, '0')}`;
@@ -42,6 +52,7 @@ export class CalibrationFlow {
   private placed = false;
   private following = false;
   private restoreTimer = 0;
+  private heightTuned = false;
 
   constructor(private readonly scene: THREE.Scene, private readonly panel: Panel) {
     this.ring = new THREE.Mesh(
@@ -92,7 +103,7 @@ export class CalibrationFlow {
         break;
       case 'verify':
       case 'tester':
-        this.handleKeys(this.detector!.update(ctx.tips));
+        this.handleKeys(this.detector!.update(ctx.pressTips, ctx.dt));
         break;
     }
     if (ctx.head.y > 0.3) {
@@ -107,6 +118,8 @@ export class CalibrationFlow {
     const index = new Map([...ctx.tips].filter(([id]) => id.endsWith('-index')));
     const p = this.capture.update(index, ctx.dt, (pt) =>
       pt.y < ctx.head.y - 0.15 && pt.y > ctx.head.y - 1.3 &&
+      // Only the finger the player is looking at (not a hand resting elsewhere).
+      inGaze(ctx, pt, 22) &&
       // The right end must be level with the left one and a keyboard-width away.
       (!left || (Math.abs(pt.y - left.y) < 0.06 && pt.distanceTo(left) > 0.3 && pt.distanceTo(left) < 1.7)));
     if (this.capture.progress > 0.05) {
@@ -136,6 +149,7 @@ export class CalibrationFlow {
     for (const e of events) {
       if (e.type === 'up') {
         view.setKeyColor(e.midi, this.step === 'verify' && e.midi === this.target() ? YELLOW : null);
+        if (this.step === 'verify' && e.maxDepth !== undefined) this.adaptHeight(e.maxDepth);
         continue;
       }
       const color = fingerHex(e.tipId);
@@ -143,9 +157,14 @@ export class CalibrationFlow {
       this.lastNote = { midi: e.midi, color };
       if (this.step === 'verify') this.onVerifyPress(e);
     }
-    const held = [...this.detector!.held()].map(([tip, midi]) => ({ midi, color: fingerHex(tip) }));
+    const held = [...this.detector!.held()].map(([tipId, midi]) => ({ tipId, midi, color: fingerHex(tipId) }));
     view.showLabels(held);
     if (events.some((e) => e.type === 'down')) this.render();
+  }
+
+  /** Held notes (for tests/debug). */
+  heldNotes(): number[] {
+    return [...(this.detector?.held().values() ?? [])];
   }
 
   /** The key to press in the verify step: middle C, or the middle key if out of range. */
@@ -153,6 +172,18 @@ export class CalibrationFlow {
     const r = this.cal!.range;
     const inRange = MIDDLE_C >= r.lowestMidi && MIDDLE_C < r.lowestMidi + r.keyCount;
     return inRange ? MIDDLE_C : r.lowestMidi + Math.floor(r.keyCount / 2);
+  }
+
+  /**
+   * The finger stops at the bottom of the key travel: put the key tops one
+   * travel above that, so later presses trigger mid-travel for this player.
+   */
+  private adaptHeight(maxDepth: number): void {
+    const cal = this.cal!;
+    cal.nudge.y = THREE.MathUtils.clamp(cal.nudge.y + (KEY_TRAVEL - maxDepth), -0.02, 0.02);
+    cal.update();
+    this.heightTuned = true;
+    this.render();
   }
 
   /** Auto-centres the grid on where the target key was actually pressed. */
@@ -194,7 +225,10 @@ export class CalibrationFlow {
       this.view = null;
       this.cal = null;
       this.placed = false;
+      this.heightTuned = false;
     }
+    // Verify: catch even shallow presses (height not tuned yet); later: normal threshold.
+    if (this.detector) this.detector.pressDepth = step === 'verify' ? 0 : PRESS_DEPTH;
     if (this.view) {
       this.view.group.visible = step !== 'restoring';
       this.view.clearColors();
@@ -264,13 +298,23 @@ export class CalibrationFlow {
       case 'touchLeft':
         p.set({
           title: 'Шаг 1 из 3',
-          lines: ['Коснись указательным пальцем', { text: 'переднего края самой ЛЕВОЙ клавиши', weight: 700, color: '#ffffff' }, 'и подержи палец 1 секунду'],
+          lines: [
+            'Поставь указательный палец',
+            { text: 'на самую ЛЕВУЮ клавишу', weight: 700, color: '#ffffff' },
+            'у ближнего к тебе края. Держи 1 сек.',
+          ],
+          picture: 'left',
         });
         break;
       case 'touchRight':
         p.set({
           title: 'Шаг 2 из 3',
-          lines: ['Теперь коснись', { text: 'переднего края самой ПРАВОЙ клавиши', weight: 700, color: '#ffffff' }, 'и подержи палец 1 секунду'],
+          lines: [
+            'Теперь поставь палец',
+            { text: 'на самую ПРАВУЮ клавишу', weight: 700, color: '#ffffff' },
+            'у ближнего к тебе края. Держи 1 сек.',
+          ],
+          picture: 'right',
           buttons: [[{ label: 'Назад', variant: 'secondary', onPress: () => this.go('touchLeft') }]],
         });
         break;
@@ -278,7 +322,11 @@ export class CalibrationFlow {
         const n = this.cal!.range.keyCount;
         p.set({
           title: 'Шаг 3 из 3 · проверка',
-          lines: [`Нажми жёлтую клавишу — ${noteLabel(this.target())}`, status],
+          lines: [
+            `Нажми жёлтую клавишу — ${noteLabel(this.target())}`,
+            status,
+            this.heightTuned ? { text: 'Высота клавиш подстроена под нажатие ✓', color: '#8af59a' } : ' ',
+          ],
           buttons: [
             [
               { label: '◀', variant: 'secondary', onPress: () => this.nudge(-NUDGE) },

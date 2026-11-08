@@ -115,14 +115,16 @@ export class App {
     this.scene.updateMatrixWorld();
 
     const tips = new Map<string, THREE.Vector3>();
+    const pressTips = new Map<string, THREE.Vector3>();
     this.hands.forEach((h, i) => {
       h.update(dt);
       if (!h.visible || !h.reliable) return;
       for (const [finger, p] of Object.entries(h.fingertips())) tips.set(`${i}-${finger}`, p);
+      for (const [finger, p] of Object.entries(h.pressTips())) pressTips.set(`${i}-${finger}`, p);
     });
 
     this.flow.update({
-      dt, tips, head: this.head, forward: this.forward,
+      dt, tips, pressTips, head: this.head, forward: this.forward,
       frame: xr.getFrame() ?? null, refSpace: xr.getReferenceSpace(),
     });
     this.panel.group.updateMatrixWorld(true);
