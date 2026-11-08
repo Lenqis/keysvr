@@ -16,3 +16,5 @@
 - 2026-11-08 Self-review loop: Claude screenshots every new scene in headless Chromium + IWER (Quest 3 emulator, synthetic hands), scores it 1–10 on a fixed rubric (docs/REVIEW.md) and iterates until ≥8/10 before handing to the user.
 - 2026-11-08 Planned "record mode": user records hand tracking + mic to a file, Claude replays it in the emulator.
 - INTERVIEW DONE
+- 2026-11-08 Three.js skills: upstream repo has skills/threejs-* (no .claude/skills/threejs); copied all except react-three-fiber into .claude/skills/.
+- 2026-11-08 Stage 0 self-review: 8.4/10 (panel, poke button, finger-colored hand skeleton; 16 draw calls).

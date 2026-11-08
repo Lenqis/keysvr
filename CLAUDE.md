@@ -19,8 +19,9 @@ Key detection = hand tracking (fingertip over calibrated key grid, dips below ke
 Calibration: user touches leftmost & rightmost key → build 61-key grid; allow other key counts.
 
 ## Commands
-(planned, created in stage 0)
-npm install · npm run dev · npm run build · npm test · npm run shots (screenshots → shots/)
+npm install · npm run dev · npm run build · npm test (Vitest)
+npm run shots — build + IWER emulator + Playwright screenshots → shots/ (gitignored).
+Emulator by hand: open the page with ?emu (optional &room=<id>, default music_studio).
 Quest: open https://lenqis.github.io/keysvr/ in the Quest browser after the PR is merged.
 
 ## Environment
