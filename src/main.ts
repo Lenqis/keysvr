@@ -10,12 +10,17 @@ function showError(text: string): void {
 
 async function boot(): Promise<void> {
   // ?emu loads Meta's Quest 3 emulator (used for automated screenshots / desktop testing).
-  if (new URLSearchParams(location.search).has('emu')) {
+  const emu = new URLSearchParams(location.search).has('emu');
+  if (emu) {
     const { installEmulator } = await import('./dev/emulator');
     await installEmulator();
   }
 
   const app = new App();
+  if (emu) {
+    const { addFakeSynth } = await import('./dev/fakeSynth');
+    addFakeSynth(app.scene);
+  }
   (window as unknown as { keysvr: App }).keysvr = app; // handle for test scripts
 
   if (!(await App.isSupported())) {

@@ -39,6 +39,7 @@ describe('PokeTarget', () => {
 
   it('does not repeat while the finger rests on the button', () => {
     const { poke, presses } = setup();
+    poke.update(tip(0, 0, 0.04), false); // approach from the front
     for (let i = 0; i < 10; i++) poke.update(tip(0, 0, -0.002), false);
     expect(presses()).toBe(1);
     poke.update(tip(0, 0, 0.05), false); // back off → re-armed
@@ -65,6 +66,13 @@ describe('PokeTarget', () => {
   it('a finger that appears already behind the face does not press', () => {
     const { poke, presses } = setup();
     poke.update(tip(0, 0, -0.03), false);
+    expect(presses()).toBe(0);
+  });
+
+  it('a finger already touching a freshly shown button does not press it', () => {
+    const { poke, presses } = setup();
+    poke.update(tip(0, 0, 0.0), false);
+    poke.update(tip(0, 0, -0.002), false);
     expect(presses()).toBe(0);
   });
 });

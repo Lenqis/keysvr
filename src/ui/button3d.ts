@@ -2,11 +2,20 @@ import * as THREE from 'three';
 import { CanvasPlane, centeredText, roundRect } from './canvasPlane';
 
 export type ButtonState = 'idle' | 'hover' | 'pressed';
+export type ButtonVariant = 'primary' | 'secondary';
 
-const STYLES: Record<ButtonState, { fill: string; text: string; glow: number }> = {
-  idle: { fill: '#3dd6c6', text: '#06201d', glow: 0.0 },
-  hover: { fill: '#7ff5ea', text: '#06201d', glow: 1.0 },
-  pressed: { fill: '#1fa597', text: '#ffffff', glow: 0.6 },
+type Style = { fill: string; text: string; glow: number; stroke?: string };
+const STYLES: Record<ButtonVariant, Record<ButtonState, Style>> = {
+  primary: {
+    idle: { fill: '#3dd6c6', text: '#06201d', glow: 0.0 },
+    hover: { fill: '#7ff5ea', text: '#06201d', glow: 1.0 },
+    pressed: { fill: '#1fa597', text: '#ffffff', glow: 0.6 },
+  },
+  secondary: {
+    idle: { fill: '#1b2a45', text: '#e6ecff', glow: 0.0, stroke: '#3dd6c6' },
+    hover: { fill: '#26406a', text: '#ffffff', glow: 1.0, stroke: '#7ff5ea' },
+    pressed: { fill: '#13203a', text: '#ffffff', glow: 0.6, stroke: '#1fa597' },
+  },
 };
 
 const PRESS_DEPTH = 0.012; // how far the face sinks when pressed (m)
@@ -23,7 +32,12 @@ export class Button3D {
   private label: string;
   onPress: (() => void) | null = null;
 
-  constructor(label: string, readonly width = 0.2, readonly height = 0.075) {
+  constructor(
+    label: string,
+    readonly width = 0.2,
+    readonly height = 0.075,
+    private readonly variant: ButtonVariant = 'primary',
+  ) {
     this.label = label;
     this.face = new CanvasPlane(width, height);
     this.face.mesh.position.z = 0.002;
@@ -55,13 +69,14 @@ export class Button3D {
   }
 
   getState(): ButtonState { return this.state; }
+  getLabel(): string { return this.label; }
 
   press(): void {
     this.onPress?.();
   }
 
   private redraw(): void {
-    const s = STYLES[this.state];
+    const s = STYLES[this.variant][this.state];
     this.face.draw((ctx, w, h) => {
       const pad = h * 0.08;
       if (s.glow > 0) {
@@ -72,7 +87,13 @@ export class Button3D {
       ctx.fillStyle = s.fill;
       ctx.fill();
       ctx.shadowBlur = 0;
-      centeredText(ctx, this.label, w / 2, h / 2 + h * 0.02, h * 0.46, s.text, 800);
+      if (s.stroke) {
+        ctx.lineWidth = h * 0.05;
+        ctx.strokeStyle = s.stroke;
+        ctx.stroke();
+      }
+      const size = Math.min(h * 0.44, (w * 0.82) / Math.max(4, this.label.length * 0.58));
+      centeredText(ctx, this.label, w / 2, h / 2 + h * 0.02, size, s.text, 800);
     });
   }
 }

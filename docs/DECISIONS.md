@@ -18,3 +18,10 @@
 - INTERVIEW DONE
 - 2026-11-08 Three.js skills: upstream repo has skills/threejs-* (no .claude/skills/threejs); copied all except react-three-fiber into .claude/skills/.
 - 2026-11-08 Stage 0 self-review: 8.4/10 (panel, poke button, finger-colored hand skeleton; 16 draw calls).
+- 2026-11-08 Calibration capture = index fingertip that comes DOWN (≥2.5 cm) onto a spot and holds still 1 s; right point must be level (±6 cm) and 0.3–1.7 m from the left. Prevents accidental captures from hovering hands.
+- 2026-11-08 Keyboard frame: origin = front edge of the lowest key at the key-top surface; +x low→high, +y up, +z toward player. Key sizes derive from measured span / white count (full-size ratios).
+- 2026-11-08 Verify step auto-centres the grid on the actual middle-C press (if within ±2 keys); arrows nudge 3 mm; key-count button cycles presets 25…88.
+- 2026-11-08 Saved calibration = persistent WebXR anchor (Quest) + local-floor pose fallback in localStorage; next launch shows "Синтезатор на месте?".
+- 2026-11-08 Key press = fingertip ≥6 mm below the key top coming from above; release above 2 mm (hysteresis). Lit keys use normal blending (additive is invisible on white keys).
+- 2026-11-08 Emulator self-review uses a dev-only fake 61-key synth (src/dev/fakeSynth.ts, ?emu only).
+- 2026-11-08 Stage 1 self-review: 8.3/10.
