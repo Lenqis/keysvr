@@ -77,6 +77,9 @@ try {
   await page.evaluate(() => localStorage.clear());
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForFunction(() => !document.querySelector('#start').disabled, null, { timeout: 60000 });
+  await page.click('#mic');
+  await page.waitForFunction(() => window.keysvr.mic.state !== 'starting', null, { timeout: 10000 });
+  if ((await page.evaluate(() => window.keysvr.mic.state)) !== 'on') errors.push('fake mic did not start');
   await shot('01-intro');
 
   await enterXR();
@@ -145,6 +148,32 @@ try {
   }
   console.log('accuracy sweep:', wrong.length ? 'WRONG ' + wrong.join(', ') : 'all 10 keys exact');
   if (wrong.length) errors.push('accuracy sweep: ' + wrong.join(', '));
+
+  // Mic: hand presses `hand`, the synth actually sounds `sound` (null = silence).
+  const micCases = [
+    { hand: 60, sound: 60, want: 'match' },
+    { hand: 60, sound: 61, want: 'corrected', shot: '08b-tester-mic-fixed' },
+    { hand: 72, sound: 70, want: 'corrected' },
+    { hand: 48, sound: 49, want: 'corrected' },
+    { hand: 62, sound: null, want: 'silent' },
+  ];
+  for (const c of micCases) {
+    const before = await page.evaluate(() => ({ ...window.keysvr.flow.testerMic.stats }));
+    const k = await synth((m) => window.fakeSynth.keyPoint(m, 0.05), c.hand);
+    await tipTo(up(k, 0.025), 0.4);
+    await remote('animate_to', { device: 'hand-right', anchor: 'index-tip', position: up(k, -0.008), orientation: PRESS_POSE, duration: 0.15 });
+    await wait(130);
+    if (c.sound !== null) await page.evaluate((m) => window.fakeSound(m), c.sound);
+    await wait(700);
+    const after = await page.evaluate(() => ({ ...window.keysvr.flow.testerMic.stats }));
+    const got = Object.keys(after).find((key) => after[key] > before[key]) ?? 'none';
+    const held = await page.evaluate(() => window.keysvr.flow.heldNotes());
+    console.log(`mic: hand ${c.hand}, sound ${c.sound} → ${got}`);
+    if (got !== c.want) errors.push(`mic case ${JSON.stringify(c)} → ${got}, held ${JSON.stringify(held)}`);
+    if (c.shot) await shot(c.shot);
+    await tipTo(up(k, 0.025), 0.15);
+    await wait(900);
+  }
 
   const e4 = await synth(() => window.fakeSynth.keyPoint(64, 0.05));
   await tipTo(up(e4, 0.03), 0.4);

@@ -15,6 +15,8 @@ export interface FlowView {
   heightTuned: boolean;
   lastNote: { midi: number; color: string } | null;
   depthText: string;
+  micVerdict: { text: string; color: string };
+  micStats: string;
   sensLabel: string;
   tipMm: number;
 }
@@ -92,7 +94,8 @@ export function panelFor(v: FlowView, a: FlowActions): PanelContent {
         title: 'Тестер клавиш',
         lines: [
           note ? { text: noteLabel(note.midi), color: note.color, size: 0.03, weight: 800 } : 'Нажимай любые клавиши',
-          note ? { text: 'Руки ✓   Микрофон — на следующем этапе', color: '#8af59a' } : ' ',
+          note ? { ...v.micVerdict, size: 0.02 } : ' ',
+          { text: v.micStats, color: '#a3a9c9', size: 0.018 },
           { text: v.depthText, color: '#a3a9c9', size: 0.018 },
         ],
         buttons: [
@@ -105,4 +108,12 @@ export function panelFor(v: FlowView, a: FlowActions): PanelContent {
       };
     }
   }
+}
+
+/** "Палец ниже верха клавиши: 3 мм · порог 4 мм" — for tuning and bug reports. */
+export function depthReadout(deepest: number | null, press: number): string {
+  const thr = Math.round(press * 1000);
+  if (deepest === null) return `Порог нажатия: ${thr} мм`;
+  const mm = Math.round(deepest * 1000);
+  return `Палец ${mm >= 0 ? 'ниже' : 'выше'} верха клавиши: ${Math.abs(mm)} мм · порог ${thr} мм`;
 }

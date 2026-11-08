@@ -3,12 +3,15 @@ import { FINGER_COLORS, type Finger } from '../hands/handView';
 import { cycleTipExtension, tipExtensionMm } from '../hands/handSettings';
 import { KeyPressDetector, SENSITIVITY, type KeyEvent, type Sensitivity } from '../hands/keyPress';
 import type { Panel } from '../ui/panel';
-import { panelFor } from './flowPanels';
+import { depthReadout, panelFor } from './flowPanels';
 import { HoldCapture, inGaze } from './holdCapture';
 import { KeyboardCalibration, frameFromPoints, plausiblePitch } from './keyboardFrame';
 import { DEFAULT_PRESET, nextPreset, noteLabel, type KeyRange } from './keyboardModel';
 import { PanelPlacement } from './panelPlacement';
 import { VerifyStep } from './verifyStep';
+import { TesterMic } from './testerMic';
+import { TouchMarkers } from './touchMarkers';
+import type { Mic } from '../audio/mic';
 import { KeyboardView } from './keyboardView';
 import { anchorMatrix, loadSaved, restoreAnchor, saveCalibration, savedMatrix } from './storage';
 
@@ -41,8 +44,7 @@ export class CalibrationFlow {
   private view: KeyboardView | null = null;
   detector: KeyPressDetector | null = null;
   readonly capture = new HoldCapture();
-  private readonly ring: THREE.Mesh;
-  private readonly marker: THREE.Mesh;
+  private readonly touch: TouchMarkers;
   left: THREE.Vector3 | null = null;
   private range: KeyRange = DEFAULT_PRESET;
   private anchor: XRAnchor | null = null;
@@ -55,21 +57,12 @@ export class CalibrationFlow {
   private readonly placement: PanelPlacement;
   private sensitivity: Sensitivity = (localStorage.getItem(SENS_KEY) as Sensitivity | null) ?? 'mid';
   private readoutTimer = 0;
+  readonly testerMic: TesterMic;
 
-  constructor(private readonly scene: THREE.Scene, private readonly panel: Panel) {
+  constructor(private readonly scene: THREE.Scene, private readonly panel: Panel, mic: Mic) {
+    this.testerMic = new TesterMic(mic);
     this.placement = new PanelPlacement(panel);
-    this.ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.014, 0.019, 40),
-      new THREE.MeshBasicMaterial({ color: YELLOW, transparent: true, depthTest: false, side: THREE.DoubleSide }),
-    );
-    this.ring.renderOrder = 8;
-    this.marker = new THREE.Mesh(
-      new THREE.SphereGeometry(0.006, 16, 12),
-      new THREE.MeshBasicMaterial({ color: YELLOW, depthTest: false }),
-    );
-    this.marker.renderOrder = 8;
-    this.ring.visible = this.marker.visible = false;
-    scene.add(this.ring, this.marker);
+    this.touch = new TouchMarkers(scene);
   }
 
   /** Called at session start. */
@@ -92,7 +85,7 @@ export class CalibrationFlow {
       if (m) this.cal.setBase(m);
     }
     this.view?.update();
-    this.ring.visible = false;
+    this.touch.ring.visible = false;
 
     switch (this.step) {
       case 'restoring':
@@ -107,6 +100,7 @@ export class CalibrationFlow {
       case 'verify':
       case 'tester':
         this.handleKeys(this.detector!.update(ctx.pressTips, ctx.dt));
+        if (this.step === 'tester') this.applyMic();
         // Live finger depth readout (helps tune sensitivity), 5 times a second.
         if (this.step === 'tester' && (this.readoutTimer += ctx.dt) > 0.2) {
           this.readoutTimer = 0;
@@ -133,21 +127,16 @@ export class CalibrationFlow {
       // The right end must be level with the left one and a keyboard-width away.
       (!left || (Math.abs(pt.y - left.y) < 0.06 && pt.distanceTo(left) > 0.3 && pt.distanceTo(left) < 1.7)));
     if (this.capture.progress > 0.05) {
-      this.ring.visible = true;
-      this.ring.position.copy(this.capture.at);
-      this.ring.lookAt(ctx.head);
-      this.ring.geometry.dispose();
-      this.ring.geometry = new THREE.RingGeometry(0.014, 0.019, 40, 1, Math.PI / 2, -Math.PI * 2 * this.capture.progress);
+      this.touch.progress(this.capture.at, ctx.head, this.capture.progress);
     }
     if (!p) return;
     if (this.step === 'touchLeft') {
       this.left = p;
-      this.marker.position.copy(p);
-      this.marker.visible = true;
+      this.touch.mark(p);
       this.go('touchRight');
     } else {
       const { base, span } = frameFromPoints(this.left!, p);
-      this.marker.visible = false;
+      this.touch.mark(null);
       this.setCalibration(new KeyboardCalibration(base, span, this.range));
       this.placed = false; // move the panel above the keyboard
       this.go('verify');
@@ -159,7 +148,7 @@ export class CalibrationFlow {
     for (const e of events) {
       if (e.type === 'up') {
         const stillTarget = this.step === 'verify' && !this.verify.done && e.midi === this.verify.target(this.cal!);
-        view.setKeyColor(e.midi, stillTarget ? YELLOW : null);
+        view.setKeyColor(this.testerMic.onRelease(e.tipId) ?? e.midi, stillTarget ? YELLOW : null);
         if (this.step === 'verify' && this.verify.onRelease(this.cal!, e)) this.render();
         continue;
       }
@@ -167,10 +156,28 @@ export class CalibrationFlow {
       view.setKeyColor(e.midi, color);
       this.lastNote = { midi: e.midi, color };
       if (this.step === 'verify') this.onVerifyPress(e);
+      else this.testerMic.onPress(e.tipId, e.midi);
     }
-    const held = [...this.detector!.held()].map(([tipId, midi]) => ({ tipId, midi, color: fingerHex(tipId) }));
-    view.showLabels(held);
+    if (events.length) this.showHeld();
     if (events.some((e) => e.type === 'down')) this.render();
+  }
+
+  /** Mic verdicts: move a wrongly detected key to the one that really sounded. */
+  private applyMic(): void {
+    for (const { tipId, verdict: v } of this.testerMic.update(this.detector!.held())) {
+      if (v.kind !== 'corrected' || this.testerMic.corrections.get(tipId) !== v.midi) continue;
+      const color = fingerHex(tipId);
+      this.view!.setKeyColor(v.handMidi, null);
+      this.view!.setKeyColor(v.midi, color);
+      this.lastNote = { midi: v.midi, color };
+      this.showHeld();
+      this.render();
+    }
+  }
+
+  private showHeld(): void {
+    const fix = this.testerMic.corrections;
+    this.view!.showLabels([...this.detector!.held()].map(([tipId, midi]) => ({ tipId, midi: fix.get(tipId) ?? midi, color: fingerHex(tipId) })));
   }
 
   /** Held notes (for tests/debug). */
@@ -215,6 +222,7 @@ export class CalibrationFlow {
       if (step === 'verify') this.detector.pressDepth = 0;
     }
     if (step === 'verify') this.verify.reset(true);
+    if (step === 'tester') this.testerMic.reset(this.cal!);
     if (this.view) {
       this.view.group.visible = step !== 'restoring';
       this.view.clearColors();
@@ -241,7 +249,9 @@ export class CalibrationFlow {
       target: this.cal ? noteLabel(this.verify.target(this.cal)) : '',
       heightTuned: this.verify.heightTuned,
       lastNote: this.lastNote,
-      depthText: this.depthReadout(),
+      depthText: depthReadout(this.detector?.deepest ?? null, SENSITIVITY[this.sensitivity].press),
+      micVerdict: this.testerMic.verdictLine(),
+      micStats: this.testerMic.statsLine(),
       sensLabel: SENSITIVITY[this.sensitivity].label,
       tipMm: tipExtensionMm(),
     }, {
@@ -253,15 +263,6 @@ export class CalibrationFlow {
       cycleSensitivity: () => this.cycleSensitivity(),
       cycleTip: () => { cycleTipExtension(); this.render(); },
     }));
-  }
-
-  /** "Палец ниже верха клавиши: 3 мм · порог 4 мм" — for tuning and bug reports. */
-  private depthReadout(): string {
-    const d = this.detector?.deepest ?? null;
-    const thr = Math.round(SENSITIVITY[this.sensitivity].press * 1000);
-    if (d === null) return `Порог нажатия: ${thr} мм`;
-    const mm = Math.round(d * 1000);
-    return `Палец ${mm >= 0 ? 'ниже' : 'выше'} верха клавиши: ${Math.abs(mm)} мм · порог ${thr} мм`;
   }
 
   private cycleSensitivity(): void {
