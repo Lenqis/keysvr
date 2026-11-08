@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CalibrationFlow } from '../calibration/flow';
 import { HandView } from '../hands/handView';
+import { Mic } from '../audio/mic';
 import { Panel } from '../ui/panel';
 import { rayHits } from '../ui/pointer';
 
@@ -16,6 +17,9 @@ export class App {
   readonly camera = new THREE.PerspectiveCamera(70, 1, 0.01, 50);
   readonly panel = new Panel();
   readonly flow: CalibrationFlow;
+  readonly mic = new Mic();
+  /** emulator: replaces the real microphone with a synthetic input */
+  micSource: ((ctx: AudioContext) => AudioNode) | undefined;
   readonly hands: HandView[] = [];
   private readonly rays: THREE.Group[] = [];
   private readonly raycaster = new THREE.Raycaster();
@@ -36,7 +40,7 @@ export class App {
     document.body.appendChild(this.renderer.domElement);
 
     this.scene.add(this.panel.group);
-    this.flow = new CalibrationFlow(this.scene, this.panel);
+    this.flow = new CalibrationFlow(this.scene, this.panel, this.mic);
     this.flow.frameSource = () => ({
       frame: this.renderer.xr.getFrame() ?? null,
       refSpace: this.renderer.xr.getReferenceSpace(),

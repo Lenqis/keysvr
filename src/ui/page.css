@@ -48,6 +48,19 @@ h1 { margin: 0; font-size: 56px; letter-spacing: 1px; }
 #start:active:not(:disabled) { background: var(--accent-dark); }
 #start:disabled { opacity: 0.5; cursor: default; }
 
+#mic {
+  padding: 16px 32px;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: 2px solid var(--accent);
+  border-radius: 999px;
+  cursor: pointer;
+}
+#mic.on { border-color: #8af59a; color: #8af59a; cursor: default; }
+#mic.bad { border-color: #ff8a8a; color: #ff8a8a; }
+
 .hint { margin: 0; font-size: 20px; color: var(--muted); max-width: 640px; }
 .hint.error { color: #ff8a8a; }
 

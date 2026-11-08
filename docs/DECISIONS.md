@@ -38,3 +38,7 @@
 - 2026-11-08 Round 3 self-review: 8.4/10; emulator accuracy sweep 10/10 keys after off-centre calibration touches.
 - 2026-11-08 Fingertip = Quest tip joint extended along the last phalanx (default +6 mm, player-tunable 0–12 mm in the tester, saved); Quest's tip sits on the finger pad.
 - 2026-11-08 Finger joints use light smoothing (2.5 Hz / β 50) so single-finger bends show; wrist keeps heavy smoothing for the speed-reliability check. Isolated ring-finger bends remain a Quest tracking limit → mic confirmation (stage 2) is the real fix.
+- 2026-11-08 Stage 2 (mic): after each hand press the mic checks the hand's key ±2 neighbours (Goertzel, harmonics 1–4, 85 ms window / 170 ms below E3) for a NEW sound (≥3× vs. before the press); the strongest fresh one wins and replaces the hand's key. If the hand's own key also sounded (chord), the hand wins. Silence → hand result stays (mode A).
+- 2026-11-08 Mic permission is asked on the 2D start page ("Разрешить микрофон"), not inside VR; once granted it starts silently with the session. Raw input (no echo cancel / noise suppression / AGC).
+- 2026-11-08 Mic samples are timestamped by the audio clock (worklet currentFrame), so slow frames don't shift the press↔sound alignment.
+- 2026-11-08 Stage 2 self-review: 8.3/10; emulator fake-mic cases 5/5 (match, ±1, −2, low register, silence).
