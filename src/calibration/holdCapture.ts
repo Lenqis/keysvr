@@ -65,3 +65,9 @@ export class HoldCapture {
     return null;
   }
 }
+
+/** Is `pt` within `deg` degrees of where the player looks? */
+export function inGaze(head: THREE.Vector3, forward: THREE.Vector3, pt: THREE.Vector3, deg: number): boolean {
+  const dir = pt.clone().sub(head).normalize();
+  return dir.dot(forward) > Math.cos(THREE.MathUtils.degToRad(deg));
+}

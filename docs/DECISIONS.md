@@ -31,3 +31,8 @@
 - 2026-11-08 Key-top height auto-tuned in the verify step: the deepest point of the player's middle-C press is taken as key bottom (top = bottom + 9 mm travel). Verify uses threshold 0, tester 5 mm.
 - 2026-11-08 Key detection uses lightly smoothed fingertips (One Euro 3 Hz / β 60); visuals keep the heavier smoothing.
 - 2026-11-08 Note labels are per fingertip and stack in rows when keys are close.
+- 2026-11-08 Verify step = press two far-apart keys (C3 and C6 on 61 keys); their real press x fixes grid offset AND key width (two-point refinement, ±10 % max). Height tuned only from the yellow-key press of the pressing fingertip.
+- 2026-11-08 Key detection: tip is "armed" while above the threshold on a key; press when ≥ threshold and a ≥5 mm downward stroke (mid). Sensitivity low/mid/high (6/4/2.5 mm, stroke 8/5/3.5 mm), persisted; tester shows live finger depth.
+- 2026-11-08 Front grace (3 cm) applies to white keys only — on black keys it stole presses from neighbouring white keys.
+- 2026-11-08 Fingertip dots drawn from the lightly smoothed tip, 2 mm inside the finger end.
+- 2026-11-08 Round 3 self-review: 8.4/10; emulator accuracy sweep 10/10 keys after off-centre calibration touches.

@@ -20,7 +20,9 @@ const FINGER_JOINTS: Record<Finger, string[]> = {
 };
 const FINGERS = Object.keys(FINGER_JOINTS) as Finger[];
 const ALL_JOINTS = ['wrist', ...FINGERS.flatMap((f) => FINGER_JOINTS[f])];
-const TIP_RADIUS = 0.0055;
+const TIP_RADIUS = 0.0045;
+/** Dot centre this far back from the finger end (just inside the fingertip). */
+const TIP_INSET = 0.002;
 /** Above this wrist speed Quest tracking gets unreliable (motion blur): fade + ignore. */
 const FAST_SPEED = 1.5; // m/s
 
@@ -105,6 +107,9 @@ export class HandView {
       this.filters[i].filter(this.world[i], dt);
     });
     const index = (name: string) => ALL_JOINTS.indexOf(name);
+    // Fingertips use the light filter: heavy smoothing lags behind a bending
+    // finger and made the dots look "deeper" than the real fingertips.
+    FINGERS.forEach((f) => this.world[index(FINGER_JOINTS[f].at(-1)!)].copy(this.pressTipsOut[f]));
 
     this.reliable = this.filters[0].speed() < FAST_SPEED;
     const mat = this.spheres.material as THREE.MeshBasicMaterial;
@@ -116,11 +121,11 @@ export class HandView {
       let r = Math.min(joints[name]?.jointRadius ?? 0.008, 0.0065);
       if (name.includes('metacarpal')) r = 0; // inside the palm
       if (name.endsWith('tip')) {
-        // The tip joint is the very end of the finger: pull the dot back by its
-        // radius so its outer edge (not its center) sits at the fingertip.
+        // The tip joint is the very end of the finger: keep the dot right there
+        // (only a hair inside), so it matches the real fingertip.
         const prev = this.world[i - 1];
         this.dir.copy(p).sub(prev).normalize();
-        this.pos.copy(p).addScaledVector(this.dir, -TIP_RADIUS);
+        this.pos.copy(p).addScaledVector(this.dir, -TIP_INSET);
         r = TIP_RADIUS;
       } else {
         this.pos.copy(p);
