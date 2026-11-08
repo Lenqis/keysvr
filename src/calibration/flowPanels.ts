@@ -15,8 +15,7 @@ export interface FlowView {
   heightTuned: boolean;
   lastNote: { midi: number; color: string } | null;
   depthText: string;
-  micVerdict: { text: string; color: string };
-  micStats: string;
+  mic: { verdict: { text: string; color: string }; hear: string; stats: string; button: string };
   sensLabel: string;
   tipMm: number;
 }
@@ -29,6 +28,7 @@ export interface FlowActions {
   finish(): void;
   cycleSensitivity(): void;
   cycleTip(): void;
+  toggleMic(): void;
 }
 
 /** Panel texts and buttons for each calibration / tester step. */
@@ -94,8 +94,9 @@ export function panelFor(v: FlowView, a: FlowActions): PanelContent {
         title: 'Тестер клавиш',
         lines: [
           note ? { text: noteLabel(note.midi), color: note.color, size: 0.03, weight: 800 } : 'Нажимай любые клавиши',
-          note ? { ...v.micVerdict, size: 0.02 } : ' ',
-          { text: v.micStats, color: '#a3a9c9', size: 0.018 },
+          note ? { ...v.mic.verdict, size: 0.02 } : ' ',
+          { text: v.mic.hear, color: '#d5d9f0', size: 0.019 },
+          { text: v.mic.stats, color: '#a3a9c9', size: 0.017 },
           { text: v.depthText, color: '#a3a9c9', size: 0.018 },
         ],
         buttons: [
@@ -103,7 +104,10 @@ export function panelFor(v: FlowView, a: FlowActions): PanelContent {
             { label: `Чувств.: ${v.sensLabel}`, variant: 'secondary', grow: 1.3, onPress: a.cycleSensitivity },
             { label: `Кончик: +${v.tipMm} мм`, variant: 'secondary', grow: 1.2, onPress: a.cycleTip },
           ],
-          [{ label: 'Калибровка', variant: 'secondary', onPress: a.recalibrate }],
+          [
+            { label: v.mic.button, variant: 'secondary', onPress: a.toggleMic },
+            { label: 'Калибровка', variant: 'secondary', onPress: a.recalibrate },
+          ],
         ],
       };
     }

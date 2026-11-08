@@ -50,7 +50,7 @@ export class Panel {
       this.bg = new CanvasPlane(W, h, 2000);
       this.bg.mesh.renderOrder = 1;
       this.group.add(this.bg.mesh);
-      this.buttonKey = ''; // panel resized → re-layout buttons
+      this.buttonKey = '\u0000'; // panel resized → re-layout buttons (also when the new set is empty)
     }
     this.drawBackground(h);
 

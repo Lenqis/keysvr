@@ -12,6 +12,7 @@ import { VerifyStep } from './verifyStep';
 import { TesterMic } from './testerMic';
 import { TouchMarkers } from './touchMarkers';
 import type { Mic } from '../audio/mic';
+import type { Shown } from '../audio/fusion';
 import { KeyboardView } from './keyboardView';
 import { anchorMatrix, loadSaved, restoreAnchor, saveCalibration, savedMatrix } from './storage';
 
@@ -99,8 +100,8 @@ export class CalibrationFlow {
         break;
       case 'verify':
       case 'tester':
-        this.handleKeys(this.detector!.update(ctx.pressTips, ctx.dt));
-        if (this.step === 'tester') this.applyMic();
+        if (this.step === 'verify') this.handleKeys(this.detector!.update(ctx.pressTips, ctx.dt));
+        else this.applyShown(this.testerMic.update(this.detector!.update(ctx.pressTips, ctx.dt)));
         // Live finger depth readout (helps tune sensitivity), 5 times a second.
         if (this.step === 'tester' && (this.readoutTimer += ctx.dt) > 0.2) {
           this.readoutTimer = 0;
@@ -143,41 +144,44 @@ export class CalibrationFlow {
     }
   }
 
+  /** Calibration verify step: hands only. */
   private handleKeys(events: KeyEvent[]): void {
     const view = this.view!;
     for (const e of events) {
       if (e.type === 'up') {
-        const stillTarget = this.step === 'verify' && !this.verify.done && e.midi === this.verify.target(this.cal!);
-        view.setKeyColor(this.testerMic.onRelease(e.tipId) ?? e.midi, stillTarget ? YELLOW : null);
-        if (this.step === 'verify' && this.verify.onRelease(this.cal!, e)) this.render();
+        const stillTarget = !this.verify.done && e.midi === this.verify.target(this.cal!);
+        view.setKeyColor(e.midi, stillTarget ? YELLOW : null);
+        if (this.verify.onRelease(this.cal!, e)) this.render();
         continue;
       }
-      const color = fingerHex(e.tipId);
-      view.setKeyColor(e.midi, color);
-      this.lastNote = { midi: e.midi, color };
-      if (this.step === 'verify') this.onVerifyPress(e);
-      else this.testerMic.onPress(e.tipId, e.midi);
+      view.setKeyColor(e.midi, fingerHex(e.tipId));
+      this.onVerifyPress(e);
     }
-    if (events.length) this.showHeld();
-    if (events.some((e) => e.type === 'down')) this.render();
+    if (events.length) view.showLabels([...this.detector!.held()].map(([tipId, midi]) => ({ tipId, midi, color: fingerHex(tipId) })));
   }
 
-  /** Mic verdicts: move a wrongly detected key to the one that really sounded. */
-  private applyMic(): void {
-    for (const { tipId, verdict: v } of this.testerMic.update(this.detector!.held())) {
-      if (v.kind !== 'corrected' || this.testerMic.corrections.get(tipId) !== v.midi) continue;
-      const color = fingerHex(tipId);
-      this.view!.setKeyColor(v.handMidi, null);
-      this.view!.setKeyColor(v.midi, color);
-      this.lastNote = { midi: v.midi, color };
-      this.showHeld();
-      this.render();
+  /** Tester: keys decided by hands + mic (see TesterMic). Mic-only notes are white. */
+  private applyShown(shown: Shown[]): void {
+    if (!shown.length) return;
+    const view = this.view!;
+    const active = this.testerMic.fusion.shown();
+    const color = (tipId: string | null) => (tipId ? fingerHex(tipId) : '#ffffff');
+    for (const s of shown) {
+      if (s.type === 'up') {
+        const still = active.find((a) => a.midi === s.midi);
+        view.setKeyColor(s.midi, still ? color(still.tipId) : null);
+      } else {
+        view.setKeyColor(s.midi, color(s.tipId));
+        this.lastNote = { midi: s.midi, color: color(s.tipId) };
+      }
     }
+    view.showLabels(active.map((a) => ({ tipId: a.id, midi: a.midi, color: color(a.tipId) })));
+    if (shown.some((s) => s.type === 'down')) this.render();
   }
 
-  private showHeld(): void {
-    const fix = this.testerMic.corrections;
-    this.view!.showLabels([...this.detector!.held()].map(([tipId, midi]) => ({ tipId, midi: fix.get(tipId) ?? midi, color: fingerHex(tipId) })));
+  /** Keys lit in the tester (for tests/debug). */
+  shownNotes(): number[] {
+    return this.testerMic.fusion.shown().map((a) => a.midi);
   }
 
   /** Held notes (for tests/debug). */
@@ -250,18 +254,18 @@ export class CalibrationFlow {
       heightTuned: this.verify.heightTuned,
       lastNote: this.lastNote,
       depthText: depthReadout(this.detector?.deepest ?? null, SENSITIVITY[this.sensitivity].press),
-      micVerdict: this.testerMic.verdictLine(),
-      micStats: this.testerMic.statsLine(),
+      mic: this.testerMic.panelView(),
       sensLabel: SENSITIVITY[this.sensitivity].label,
       tipMm: tipExtensionMm(),
     }, {
       recalibrate: () => this.go('touchLeft'),
       confirm: () => this.go('tester'),
-      nudge: (dx) => this.nudge(dx * NUDGE),
+      nudge: (dx) => { this.cal!.nudge.x += dx * NUDGE; this.cal!.update(); },
       cycleKeys: () => this.cycleKeys(),
       finish: () => void this.finish(),
       cycleSensitivity: () => this.cycleSensitivity(),
       cycleTip: () => { cycleTipExtension(); this.render(); },
+      toggleMic: () => { this.applyShown(this.testerMic.toggle()); this.render(); },
     }));
   }
 
@@ -270,11 +274,6 @@ export class CalibrationFlow {
     localStorage.setItem(SENS_KEY, this.sensitivity);
     this.detector?.setSensitivity(this.sensitivity);
     this.render();
-  }
-
-  private nudge(dx: number): void {
-    this.cal!.nudge.x += dx;
-    this.cal!.update();
   }
 
   private cycleKeys(): void {

@@ -1,4 +1,4 @@
-import type { SampleSource } from './noteJudge';
+import type { SampleSource } from './keySpectrum';
 
 /** Worklet that forwards mic samples to the main thread in ~20 ms batches. */
 const WORKLET = `
