@@ -6,9 +6,11 @@ Decisions log: docs/DECISIONS.md (append one line per decision).
 Feedback history: docs/FEEDBACK.md.
 
 ## Stack
-<!-- Filled in after the interview. Default proposal: WebXR (Three.js + Vite + TypeScript),
-     passthrough via immersive-ar, hand tracking via WebXR Hand Input. -->
-TBD
+WebXR in Quest 3 browser: Three.js + Vite + TypeScript. Passthrough = immersive-ar,
+hands = WebXR Hand Input, mic = getUserMedia + Web Audio (Goertzel on expected notes).
+MIDI parsing @tonejs/midi; background synth via Web Audio. Song search proxy = Cloudflare Worker.
+Self-review: Playwright + headless Chromium + IWER (Meta Quest 3 emulator, synthetic hands).
+Unit tests: Vitest.
 
 ## Hardware (fixed)
 Synth: Tesler KB-6150 — 61 keys (C2–C7, 5 octaves), 8-voice polyphony, NO MIDI/USB/Bluetooth.
@@ -17,13 +19,15 @@ Key detection = hand tracking (fingertip over calibrated key grid, dips below ke
 Calibration: user touches leftmost & rightmost key → build 61-key grid; allow other key counts.
 
 ## Commands
-<!-- Fill in: dev server, build, test, how to open on Quest -->
-TBD
+npm install · npm run dev · npm run build · npm test (Vitest)
+npm run shots — build + IWER emulator + Playwright screenshots → shots/ (gitignored).
+Emulator by hand: open the page with ?emu (optional &room=<id>, default music_studio).
+Quest: open https://lenqis.github.io/keysvr/ in the Quest browser after the PR is merged.
 
 ## Environment
 User works in Claude Code on the web (cloud sessions, GitHub repo). No local PC dev server.
 Testing = GitHub Pages (HTTPS, needed for WebXR) deployed by GitHub Actions on push to main.
-User merges each PR, then opens the Pages URL in the Quest browser. Put that URL here.
+User merges each PR, then opens https://lenqis.github.io/keysvr/ in the Quest browser.
 Never commit downloaded songs to the repo (public repo); songs live in the browser storage.
 
 ## Rules
@@ -37,4 +41,6 @@ Never commit downloaded songs to the repo (public repo); songs live in the brows
   from open web sources, plus manual file import. Let the user pick the melody track.
   Background track is synthesized from the same file so it stays in sync.
 - Never hardcode keyboard size: everything derives from calibration (lowest/highest key).
+- Self-review before handoff: screenshot every new/changed scene in IWER, score it 1–10 by
+  docs/REVIEW.md rubric, iterate until ≥8/10. Only then give it to the user.
 - Update this file's Stack/Commands sections when they change. Keep this file under 60 lines.
