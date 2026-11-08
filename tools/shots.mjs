@@ -66,7 +66,8 @@ async function enterXR() {
   await remote('set_hand_pose', { device: 'hand-right', poseId: 'point' }).catch(() => {});
   await remote('set_transform', { device: 'headset', position: { x: 0, y: 1.32, z: 0.2 } });
   await remote('look_at', { device: 'headset', target: { x: 0, y: 0.9, z: -0.45 } });
-  await tipTo({ x: 0.25, y: 1.0, z: -0.05 }, 0.3);
+  // Park the hand instantly (no downward approach, so it must not be captured).
+  await remote('set_transform', { device: 'hand-right', anchor: 'index-tip', position: { x: 0.25, y: 1.0, z: -0.05 }, orientation: PRESS_POSE });
   await wait(1500);
 }
 
@@ -83,18 +84,19 @@ try {
 
   const left = await synth(() => window.fakeSynth.left);
   const right = await synth(() => window.fakeSynth.right);
-  await tipTo(up(left, 0.05), 0.5);
-  await tipTo(left, 0.3);
-  await wait(500);
+  await tipTo(up(left, 0.05), 0.9);
+  await tipTo(left, 0.4);
+  await wait(1000);
   await shot('03-holding');
-  await wait(900);
+  await page.waitForFunction(() => window.keysvr.flow.step === 'touchRight', null, { timeout: 8000 }).catch(() => {});
   await expectStep('touchRight');
   await tipTo(up(left, 0.06), 0.3);
   await shot('04-touch-right');
 
-  await tipTo(up(right, 0.06), 0.6);
-  await tipTo(right, 0.3);
-  await wait(1500);
+  await tipTo(up(right, 0.06), 1.4); // realistic speed (< 1.5 m/s keeps tracking "reliable")
+  await tipTo(right, 0.4);
+  // Software-rendered emulator runs ~2.5x slower than real time: hold longer.
+  await page.waitForFunction(() => window.keysvr.flow.step === 'verify', null, { timeout: 8000 }).catch(() => {});
   await expectStep('verify');
   await tipTo(up(right, 0.06), 0.3);
   await shot('05-verify');
@@ -116,17 +118,21 @@ try {
   await tipTo(up(e4, -0.009), 0.2);
   await wait(200);
   await shot('07-tester-e4');
-  const fs4 = await synth(() => window.fakeSynth.keyPoint(66, 0.11, 0.012));
+  const fs4 = await synth(() => window.fakeSynth.keyPoint(66, 0.04));
   await tipTo(up(fs4, 0.03), 0.3);
   await tipTo(up(fs4, -0.009), 0.2);
   await wait(200);
   await shot('08-tester-black');
   await tipTo(up(fs4, 0.05), 0.2);
 
+  // Measure the app alone (hide the fake synth, which stands in for the real one).
+  await page.evaluate(() => { window.fakeSynth.group.visible = false; });
+  await wait(300);
   const info = await page.evaluate(() => {
     const r = window.keysvr.renderer.info.render;
     return { drawCalls: r.calls, triangles: r.triangles };
   });
+  await page.evaluate(() => { window.fakeSynth.group.visible = true; });
   console.log('render stats:', JSON.stringify(info));
 
   // New session: the saved calibration should come back.

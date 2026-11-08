@@ -16,7 +16,7 @@ export class App {
   readonly camera = new THREE.PerspectiveCamera(70, 1, 0.01, 50);
   readonly panel = new Panel();
   readonly flow: CalibrationFlow;
-  private readonly hands: HandView[] = [];
+  readonly hands: HandView[] = [];
   private readonly rays: THREE.Group[] = [];
   private readonly raycaster = new THREE.Raycaster();
   private readonly cursor: THREE.Mesh;

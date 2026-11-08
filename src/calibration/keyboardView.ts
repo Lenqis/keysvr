@@ -4,11 +4,12 @@ import { noteLabel } from './keyboardModel';
 import { CanvasPlane, centeredText, roundRect } from '../ui/canvasPlane';
 
 const LIFT = 0.0015; // draw just above the key tops to avoid z-fighting with reality
-const FILL_IDLE = new THREE.Color(0x0a1414);
+const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
 
 /**
- * Translucent key grid drawn over the real keyboard: outlines + additive fills
- * (additive = never darkens passthrough; brightness is the "opacity").
+ * Translucent key grid drawn over the real keyboard: outlines for every key,
+ * and a semi-opaque colored fill only on lit keys (normal blending, so colors
+ * stay visible on white keys too).
  */
 export class KeyboardView {
   readonly group = new THREE.Group();
@@ -17,6 +18,7 @@ export class KeyboardView {
   private readonly labels: CanvasPlane[] = [];
   private readonly colors = new Map<number, THREE.Color>();
   private index = new Map<number, number>();
+  private baseMatrices: THREE.Matrix4[] = [];
 
   constructor(private readonly cal: KeyboardCalibration) {
     this.group.matrixAutoUpdate = false;
@@ -30,7 +32,7 @@ export class KeyboardView {
     const { keys } = this.cal.layout;
     this.fills = new THREE.InstancedMesh(
       new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false }),
       keys.length,
     );
     this.fills.renderOrder = 2;
@@ -38,14 +40,16 @@ export class KeyboardView {
     const pts: number[] = [];
     const m = new THREE.Matrix4();
     this.index = new Map();
+    this.baseMatrices = [];
     keys.forEach((k, i) => {
       this.index.set(k.midi, i);
       const len = k.zFront - k.zBack;
       const w = k.width;
       const y = k.top + LIFT;
       m.makeScale(w, 1, len).setPosition(k.x, y, (k.zFront + k.zBack) / 2);
-      this.fills!.setMatrixAt(i, m);
-      this.fills!.setColorAt(i, FILL_IDLE);
+      this.baseMatrices.push(m.clone());
+      this.fills!.setMatrixAt(i, HIDDEN);
+      this.fills!.setColorAt(i, new THREE.Color(0xffffff));
       const x0 = k.x - w / 2, x1 = k.x + w / 2;
       const rect = [[x0, k.zFront], [x1, k.zFront], [x1, k.zBack], [x0, k.zBack]];
       for (let j = 0; j < 4; j++) {
@@ -74,7 +78,10 @@ export class KeyboardView {
     if (i === undefined) return;
     if (color === null) this.colors.delete(midi);
     else this.colors.set(midi, new THREE.Color(color));
-    this.fills!.setColorAt(i, this.colors.get(midi) ?? FILL_IDLE);
+    const c = this.colors.get(midi);
+    this.fills!.setMatrixAt(i, c ? this.baseMatrices[i] : HIDDEN);
+    if (c) this.fills!.setColorAt(i, c);
+    this.fills!.instanceMatrix.needsUpdate = true;
     this.fills!.instanceColor!.needsUpdate = true;
   }
 
@@ -85,7 +92,7 @@ export class KeyboardView {
   /** Floating note names over the given keys (pooled labels). */
   showLabels(notes: { midi: number; color: string }[]): void {
     while (this.labels.length < notes.length) {
-      const l = new CanvasPlane(0.07, 0.03, 2400);
+      const l = new CanvasPlane(0.095, 0.04, 2000);
       l.mesh.renderOrder = 6;
       this.labels.push(l);
       this.group.add(l.mesh);

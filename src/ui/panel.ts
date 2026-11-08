@@ -22,10 +22,10 @@ export interface PanelContent {
   buttons?: ButtonSpec[][];
 }
 
-const W = 0.46;
+const W = 0.5;
 const PAD = 0.02;
 const TITLE_H = 0.05;
-const LINE_H = 0.028;
+const LINE_H = 0.032;
 const ROW_H = 0.07;
 const ROW_GAP = 0.014;
 
@@ -81,9 +81,10 @@ export class Panel {
   /** Per-frame: fingertip pokes + ray hover. */
   update(tips: Map<string, THREE.Vector3>, rays: THREE.Object3D[], raycaster: THREE.Raycaster): void {
     if (!this.group.visible) return;
-    for (const { btn, poke } of this.buttons) {
+    // Snapshot: a press may rebuild the buttons; one press per frame at most.
+    for (const { btn, poke } of [...this.buttons]) {
       const hover = rays.some((r) => rayHits(raycaster, r, btn.group) !== null);
-      poke.update(tips, hover);
+      if (poke.update(tips, hover)) break;
     }
   }
 
@@ -120,11 +121,11 @@ export class Panel {
       ctx.strokeStyle = c.accent ?? '#3dd6c6';
       ctx.stroke();
       let y = (PAD + TITLE_H / 2) * s;
-      centeredText(ctx, c.title, w / 2, y, 0.034 * s, c.titleColor ?? '#f2f4ff', 800);
+      centeredText(ctx, c.title, w / 2, y, 0.037 * s, c.titleColor ?? '#f2f4ff', 800);
       y += (TITLE_H / 2 + LINE_H / 2) * s;
       for (const raw of c.lines ?? []) {
         const line = typeof raw === 'string' ? { text: raw } : raw;
-        const size = (line.size ?? 0.019) * s;
+        const size = (line.size ?? 0.023) * s;
         ctx.font = `${line.weight ?? 500} ${size}px ${FONT}`;
         fitText(ctx, line.text, w * 0.92, size, line.weight ?? 500);
         centeredText(ctx, line.text, w / 2, y, parseFloat(ctx.font.split(' ')[1]), line.color ?? '#d5d9f0', line.weight ?? 500);

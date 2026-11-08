@@ -30,16 +30,17 @@ export class CalibrationFlow {
   cal: KeyboardCalibration | null = null;
   private view: KeyboardView | null = null;
   private detector: KeyPressDetector | null = null;
-  private readonly capture = new HoldCapture();
+  readonly capture = new HoldCapture();
   private readonly ring: THREE.Mesh;
   private readonly marker: THREE.Mesh;
-  private left: THREE.Vector3 | null = null;
+  left: THREE.Vector3 | null = null;
   private range: KeyRange = DEFAULT_PRESET;
   private anchor: XRAnchor | null = null;
   private status = '';
   private statusColor = '#d5d9f0';
   private lastNote: { midi: number; color: string } | null = null;
   private placed = false;
+  private following = false;
   private restoreTimer = 0;
 
   constructor(private readonly scene: THREE.Scene, private readonly panel: Panel) {
@@ -94,13 +95,20 @@ export class CalibrationFlow {
         this.handleKeys(this.detector!.update(ctx.tips));
         break;
     }
-    if (!this.placed && ctx.head.y > 0.3) this.placePanel(ctx);
+    if (ctx.head.y > 0.3) {
+      if (!this.placed) this.placePanel(ctx);
+      else if (!this.cal) this.followGaze(ctx);
+    }
   }
 
   private updateTouch(ctx: FrameCtx): void {
     const left = this.left;
-    const p = this.capture.update(ctx.tips, ctx.dt, (pt) =>
-      pt.y < ctx.head.y - 0.15 && pt.y > ctx.head.y - 1.3 && (!left || pt.distanceTo(left) > 0.25));
+    // Only index fingertips can mark a point (curling other fingers looks like a descent).
+    const index = new Map([...ctx.tips].filter(([id]) => id.endsWith('-index')));
+    const p = this.capture.update(index, ctx.dt, (pt) =>
+      pt.y < ctx.head.y - 0.15 && pt.y > ctx.head.y - 1.3 &&
+      // The right end must be level with the left one and a keyboard-width away.
+      (!left || (Math.abs(pt.y - left.y) < 0.06 && pt.distanceTo(left) > 0.3 && pt.distanceTo(left) < 1.7)));
     if (this.capture.progress > 0.05) {
       this.ring.visible = true;
       this.ring.position.copy(this.capture.at);
@@ -206,12 +214,32 @@ export class CalibrationFlow {
     this.placed = true;
     if (this.cal && this.view) {
       const L = this.cal.layout;
-      const pos = this.view.localToWorld(this.cal.span / 2, 0.2, -L.whiteLength - 0.03);
+      const pos = this.view.localToWorld(this.cal.span / 2, 0.27, -L.whiteLength - 0.02);
       this.panel.group.position.copy(pos);
       this.panel.group.lookAt(ctx.head);
     } else {
-      this.panel.placeInFrontOf(ctx.head, ctx.forward, 0.7, 0.08);
+      this.panel.placeInFrontOf(ctx.head, ctx.forward, 0.7, 0.12);
     }
+  }
+
+  /**
+   * No keyboard yet: keep the hint panel in view when the player turns, at eye
+   * level (so looking down at the keys never puts it on top of them).
+   */
+  private followGaze(ctx: FrameCtx): void {
+    const g = this.panel.group;
+    const toPanel = new THREE.Vector3(g.position.x - ctx.head.x, 0, g.position.z - ctx.head.z).normalize();
+    const fwd = new THREE.Vector3(ctx.forward.x, 0, ctx.forward.z);
+    if (fwd.lengthSq() < 1e-4) return;
+    fwd.normalize();
+    if (toPanel.dot(fwd) < Math.cos(THREE.MathUtils.degToRad(25))) this.following = true;
+    if (!this.following) return;
+    // Ease toward the spot straight ahead rather than jumping; stop once there.
+    const target = ctx.head.clone().addScaledVector(fwd, 0.7);
+    target.y = ctx.head.y - 0.12;
+    g.position.lerp(target, Math.min(1, ctx.dt * 4));
+    g.lookAt(ctx.head);
+    if (g.position.distanceTo(target) < 0.02) this.following = false;
   }
 
   /** Redraws the panel for the current step. */

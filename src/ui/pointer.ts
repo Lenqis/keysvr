@@ -43,8 +43,10 @@ export class PokeTarget {
       let armed = this.armed.get(id) ?? true;
       if (z === null || z > RELEASE_DIST) armed = true;
       // Press only when the finger crosses the face from the front this frame.
-      const crossed = z !== null && z <= PRESS_DIST && (prev === null || prev > PRESS_DIST);
-      if (crossed && armed && (prev !== null || z > -0.01)) {
+      const crossed = z !== null && z <= PRESS_DIST && prev !== null && prev > PRESS_DIST;
+      // A tip seen for the first time only initialises (e.g. a finger already on
+      // the spot where a new button just appeared must not press it).
+      if (crossed && armed && prev !== null) {
         armed = false;
         pressed = true;
       }

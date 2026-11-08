@@ -39,6 +39,7 @@ export function addFakeSynth(scene: THREE.Scene) {
 
   const world = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyMatrix4(group.matrixWorld);
   const api = {
+    group,
     /** front-edge centre of the lowest / highest key, on the surface */
     left: world(layout.keys[0].x, 0, -0.004),
     right: world(layout.keys.at(-1)!.x, 0, -0.004),
